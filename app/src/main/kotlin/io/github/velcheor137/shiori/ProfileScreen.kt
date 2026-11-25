@@ -109,6 +109,13 @@ fun ProfileScreen(nav: androidx.navigation.NavController) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        val appTheme by app.store.appTheme.collectAsStateWithLifecycle()
+        Text("Тема приложения", style = MaterialTheme.typography.titleSmall)
+        androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            AppTheme.entries.forEach { t ->
+                androidx.compose.material3.FilterChip(selected = appTheme == t, onClick = { app.store.setAppTheme(t) }, label = { Text(t.label) })
+            }
+        }
         OutlinedButton(onClick = { nav.navigate("downloads") }) { Text("Загрузки") }
         OutlinedButton(onClick = { logOpen = true }) { Text("Журнал") }
         Text(

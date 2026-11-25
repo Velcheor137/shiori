@@ -64,6 +64,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -190,9 +194,15 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
     val scope = rememberCoroutineScope()
 
     ScreenEffects(settings)
+    // Панели прячутся, как только начинается прокрутка; показываются по тапу.
+    LaunchedEffect(list) { snapshotFlow { list.isScrollInProgress }.collect { if (it) bars = false } }
 
-    fun goTo(c: ChapterEntry) {
-        nav.navigate(Routes.reader(slug, branchId, c.volume, c.number)) {
+    fun goTo(c: ChapterEntry, toBranch: Long = branchId) {
+        if (toBranch != branchId) {
+            (state as? Load.Ready)?.value?.title?.id?.let { app.store.pinBranch(it, toBranch) }
+            AppLog.i("READER", "Перевод сменён пользователем: $branchId → $toBranch")
+        }
+        nav.navigate(Routes.reader(slug, toBranch, c.volume, c.number)) {
             nav.currentBackStackEntry?.destination?.id?.let { id -> popUpTo(id) { inclusive = true } }
         }
     }
@@ -259,11 +269,12 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
             when (sheet) {
                 Sheet.Settings -> ReaderSettingsPanel(settings) { t -> app.store.updateSettings(t) }
                 Sheet.Chapters -> ChaptersPanel(
-                    chapters = d?.branchChapters ?: app.chapterCache[slug].orEmpty().filter { it.version(branchId) != null },
+                    all = app.chapterCache[slug].orEmpty(),
+                    labels = app.branchLabels[slug].orEmpty(),
+                    initialBranch = branchId,
                     current = volume to number,
                     downloaded = d?.let { DownloadFiles.downloadedIds(app, it.title.id) }.orEmpty(),
-                    branchId = branchId,
-                ) { c -> sheet = Sheet.None; goTo(c) }
+                ) { c, b -> sheet = Sheet.None; goTo(c, b) }
                 Sheet.Comments -> if (d?.entry != null) CommentsPanel(slug, d.entry, branchId, d.chapter.id) else Text("Комментарии недоступны", Modifier.padding(24.dp))
                 Sheet.Bookmarks -> if (d != null) BookmarksPanel(
                     titleId = d.title.id,
@@ -292,6 +303,13 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
 private fun ScreenEffects(settings: ReaderSettings) {
     val view = LocalView.current
     val activity = LocalContext.current as? Activity
+    // Полный экран: прячем строку состояния и навигацию, вызываются свайпом от края.
+    DisposableEffect(Unit) {
+        val controller = activity?.window?.let { WindowCompat.getInsetsController(it, view) }
+        controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller?.hide(WindowInsetsCompat.Type.systemBars())
+        onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) }
+    }
     DisposableEffect(settings.keepScreenOn) {
         view.keepScreenOn = settings.keepScreenOn
         onDispose { view.keepScreenOn = false }
@@ -368,18 +386,31 @@ private fun ChapterText(
     val progress by remember { derivedStateOf { if (list.layoutInfo.totalItemsCount <= 1) 0 else (list.firstVisibleItemIndex * 100 / (list.layoutInfo.totalItemsCount - 1)).coerceIn(0, 100) } }
     val current by remember { derivedStateOf { list.firstVisibleItemIndex } }
 
+    val clipboard = LocalContext.current.getSystemService(android.content.ClipboardManager::class.java)
     Box(Modifier.fillMaxSize()) {
+      SelectionContainer {
         LazyColumn(
             state = list,
-            modifier = Modifier.fillMaxSize().padding(horizontal = settings.sideMargin.dp).pointerInput(settings.tapToPage) {
-                detectTapGestures { pos ->
-                    val h = size.height
-                    when {
-                        settings.tapToPage && pos.y < h * 0.22f -> scope.launch { list.animateScrollBy(-h * 0.85f) }
-                        settings.tapToPage && pos.y > h * 0.78f -> scope.launch { list.animateScrollBy(h * 0.85f) }
-                        else -> onTapCenter()
-                    }
-                }
+            modifier = Modifier.fillMaxSize().padding(horizontal = settings.sideMargin.dp).pointerInput(settings.tapToPage, shown) {
+                detectTapGestures(
+                    onDoubleTap = { pos ->
+                        // Двойной тап — скопировать абзац целиком.
+                        val item = list.layoutInfo.visibleItemsInfo.firstOrNull { pos.y.toInt() in it.offset until it.offset + it.size }
+                        val block = shown.getOrNull((item?.index ?: 0) - 1) as? Shown.Text
+                        if (block != null) {
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Shiori", block.text.text))
+                            Toast.makeText(app, "Абзац скопирован", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onTap = { pos ->
+                        val h = size.height
+                        when {
+                            settings.tapToPage && pos.y < h * 0.22f -> scope.launch { list.animateScrollBy(-h * 0.85f) }
+                            settings.tapToPage && pos.y > h * 0.78f -> scope.launch { list.animateScrollBy(h * 0.85f) }
+                            else -> onTapCenter()
+                        }
+                    },
+                )
             },
         ) {
             item(key = "head") {
@@ -433,6 +464,7 @@ private fun ChapterText(
                 }
             }
         }
+      }
         if (settings.showProgress) {
             Text(
                 "$progress%",

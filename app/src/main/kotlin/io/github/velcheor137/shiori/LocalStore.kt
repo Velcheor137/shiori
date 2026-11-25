@@ -41,6 +41,8 @@ data class LocalBookmark(
     val createdAt: Long,
 )
 
+enum class AppTheme(val label: String) { Dark("Тёмная"), Light("Светлая"), System("Как в системе") }
+
 enum class TextMode(val label: String) { Original("Оригинал"), Literary("Литературный") }
 
 enum class ReaderTheme(val label: String) {
@@ -115,6 +117,14 @@ class LocalStore(context: Context) {
     private val _downloads = MutableStateFlow(read(KEY_DOWNLOADS) { json.decodeFromString(ListSerializer(DownloadTask.serializer()), it) } ?: emptyList())
     val downloads: StateFlow<List<DownloadTask>> = _downloads.asStateFlow()
 
+    private val _appTheme = MutableStateFlow(runCatching { AppTheme.valueOf(prefs.getString(KEY_THEME, null) ?: "Dark") }.getOrDefault(AppTheme.Dark))
+    val appTheme: StateFlow<AppTheme> = _appTheme.asStateFlow()
+
+    fun setAppTheme(t: AppTheme) {
+        _appTheme.value = t
+        prefs.edit().putString(KEY_THEME, t.name).apply()
+    }
+
     private val _syncAccount = MutableStateFlow(prefs.getBoolean(KEY_SYNC, false))
     val syncAccount: StateFlow<Boolean> = _syncAccount.asStateFlow()
 
@@ -170,5 +180,6 @@ class LocalStore(context: Context) {
         const val KEY_BOOKMARKS = "local_bookmarks"
         const val KEY_DOWNLOADS = "download_queue"
         const val KEY_SYNC = "sync_account_progress"
+        const val KEY_THEME = "app_theme"
     }
 }

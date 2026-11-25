@@ -5,6 +5,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
+import android.graphics.Color
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +36,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            val theme by shiori.store.appTheme.collectAsStateWithLifecycle()
+            val dark = theme == AppTheme.Dark || (theme == AppTheme.System && isSystemInDarkTheme())
+            DisposableEffect(dark) {
+                val style = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+                onDispose { }
+            }
             ShioriTheme {
                 Surface(Modifier.fillMaxSize()) { ShioriNav() }
             }
@@ -60,7 +72,8 @@ private fun ShioriNav() {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val showBar = route in tabs.map { it.route }
-    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+    val immersive = route?.startsWith("reader") == true
+    Column(Modifier.fillMaxSize().then(if (immersive) Modifier else Modifier.safeDrawingPadding())) {
         Box(Modifier.weight(1f)) {
             NavHost(nav, startDestination = "home") {
                 composable("home") { HomeScreen(nav) }

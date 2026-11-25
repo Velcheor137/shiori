@@ -147,6 +147,37 @@ class LibSocialApi(private val http: LibSocialHttp) {
         return CommentsPage(roots, replies, root.obj("meta")?.bool("has_next_page") == true)
     }
 
+    /** Голос за комментарий, как на сайте: `POST /api/comments/{id}/vote {vote}`; 1 — плюс, 0 — минус (повтор снимает голос). */
+    suspend fun voteComment(commentId: Long, vote: Int): Boolean {
+        val r = http.postJson("/api/comments/$commentId/vote", "{\"vote\":$vote}")
+        AppLog.i(TAG, "Голос $vote за комментарий $commentId: HTTP ${r.code}")
+        if (!r.isSuccess) throw ApiException(r.code, describe(r))
+        return true
+    }
+
+    /**
+     * Новый комментарий или ответ (`POST /api/comments`). Текст отправляется в формате редактора сайта
+     * (ProseMirror doc): абзацы по строкам.
+     */
+    suspend fun postComment(postId: Long, postType: String, text: String, replyTo: Comment?): Comment? {
+        val paragraphs = text.trim().split(Regex("\\n+")).joinToString(",") { line ->
+            "{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":" + kotlinx.serialization.json.JsonPrimitive(line).toString() + "}]}"
+        }
+        val body = buildString {
+            append("{\"comment\":{\"type\":\"doc\",\"content\":[").append(paragraphs).append("]},")
+            append("\"attachments\":[],\"post_type\":\"").append(postType).append("\",\"post_id\":").append(postId).append(',')
+            append("\"parent_comment\":").append(replyTo?.id ?: "null").append(',')
+            append("\"root_id\":").append(replyTo?.let { it.rootId ?: it.id } ?: "null").append(',')
+            append("\"comment_level\":").append(replyTo?.let { it.level + 1 } ?: 0)
+            if (postType == "chapter") append(",\"post_page\":1")
+            append('}')
+        }
+        val r = http.postJson("/api/comments", body)
+        AppLog.i(TAG, "Комментарий отправлен: HTTP ${r.code}")
+        if (!r.isSuccess) throw ApiException(r.code, describe(r) + (if (r.isJson) ": " + r.body.take(200) else ""))
+        return (runCatching { json.parseToJsonElement(r.body) }.getOrNull() as? JsonObject)?.let { (it["data"] as? JsonObject ?: it).toComment(postId) }
+    }
+
     /** Закладка аккаунта на тайтл (`GET /api/manga/{slug}/bookmark`). null — закладки нет или не вошли. */
     suspend fun titleBookmark(slug: String): AccountBookmark? = runCatching {
         val o = getObject("/api/manga/$slug/bookmark").obj("data") ?: return@runCatching null
@@ -183,6 +214,8 @@ class LibSocialApi(private val http: LibSocialHttp) {
             votesUp = votes?.int("up") ?: votes?.int("likes") ?: int("votes_up"),
             votesDown = votes?.int("down") ?: votes?.int("dislikes"),
             repliesCount = int("replies_count") ?: 0,
+            userVote = votes?.int("user"),
+            level = int("comment_level") ?: 0,
         )
     }
 

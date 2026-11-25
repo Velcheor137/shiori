@@ -79,6 +79,9 @@ data class Comment(
     val votesUp: Int?,
     val votesDown: Int?,
     val repliesCount: Int,
+    /** Голос текущего пользователя: 1 — плюс, 0 — минус, null — нет. */
+    val userVote: Int? = null,
+    val level: Int = 0,
 )
 
 data class CommentsPage(val roots: List<Comment>, val replies: List<Comment>, val hasNext: Boolean)

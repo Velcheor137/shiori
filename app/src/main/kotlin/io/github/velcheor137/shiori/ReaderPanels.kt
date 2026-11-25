@@ -53,10 +53,23 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.velcheor137.shiori.data.libsocial.ChapterEntry
 
-/** Список глав перевода с поиском по номеру или названию (§10.2). */
+/** Список глав с выбором переводчика (как на RanobeLib) и поиском по номеру или названию (§10.2). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ChaptersPanel(chapters: List<ChapterEntry>, current: Pair<String, String>, downloaded: Set<Long>, branchId: Long, onPick: (ChapterEntry) -> Unit) {
+fun ChaptersPanel(
+    all: List<ChapterEntry>,
+    labels: Map<Long, String>,
+    initialBranch: Long,
+    current: Pair<String, String>,
+    downloaded: Set<Long>,
+    onPick: (ChapterEntry, Long) -> Unit,
+) {
+    var branchId by remember { mutableStateOf(initialBranch) }
     var query by remember { mutableStateOf("") }
+    val branches = remember(all) {
+        all.flatMap { c -> c.versions.map { it.branchId } }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key to it.value }
+    }
+    val chapters = remember(all, branchId) { all.filter { it.version(branchId) != null } }
     val filtered = remember(query, chapters) { filterChapters(chapters, query) }
     val list = rememberLazyListState()
     LaunchedEffect(Unit) {
@@ -64,6 +77,22 @@ fun ChaptersPanel(chapters: List<ChapterEntry>, current: Pair<String, String>, d
         if (i > 3) list.scrollToItem(i - 3)
     }
     Column(Modifier.fillMaxWidth().heightIn(max = 640.dp)) {
+        if (branches.size > 1) {
+            Text("Переводчик", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelLarge)
+            FlowRow(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                branches.forEach { (id, count) ->
+                    FilterChip(selected = id == branchId, onClick = { branchId = id }, label = { Text("${labels[id] ?: "Перевод $id"} · $count") })
+                }
+            }
+            if (branchId != initialBranch) {
+                Text(
+                    "Выбор главы в этом списке сменит закреплённый перевод.",
+                    Modifier.padding(horizontal = 16.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -74,9 +103,9 @@ fun ChaptersPanel(chapters: List<ChapterEntry>, current: Pair<String, String>, d
         Text("Глав в переводе: ${chapters.size}", Modifier.padding(16.dp, 6.dp), style = MaterialTheme.typography.bodySmall)
         LazyColumn(state = list) {
             items(filtered, key = { it.apiId }) { c ->
-                val isCurrent = c.volume == current.first && c.number == current.second
+                val isCurrent = branchId == initialBranch && c.volume == current.first && c.number == current.second
                 val v = c.version(branchId)
-                Row(Modifier.fillMaxWidth().clickable { onPick(c) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().clickable { onPick(c, branchId) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         c.label,
                         Modifier.weight(1f),
