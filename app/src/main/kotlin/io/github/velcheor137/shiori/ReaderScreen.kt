@@ -499,32 +499,38 @@ private fun ChapterText(
     }
 }
 
-/** Полоса прочитанного справа (как на RanobeLib): тонкая дорожка и бегунок по положению в главе. */
+/**
+ * Полоса прочитанного справа, как на RanobeLib: тонкий ползунок у самого края. Длина бегунка — доля
+ * видимого текста в главе (у длинной главы короче), дорожка почти во всю высоту и едва заметна.
+ */
 @Composable
 private fun ReadingScrollbar(list: androidx.compose.foundation.lazy.LazyListState, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
-    val fraction by remember {
+    val metrics by remember {
         derivedStateOf {
             val info = list.layoutInfo
-            val total = info.totalItemsCount
             val visible = info.visibleItemsInfo
-            if (total == 0 || visible.isEmpty()) 0f
+            val total = info.totalItemsCount
+            if (total == 0 || visible.isEmpty()) 0f to 1f
             else {
+                val viewport = (info.viewportEndOffset - info.viewportStartOffset).coerceAtLeast(1)
+                val avg = visible.sumOf { it.size }.toFloat() / visible.size
+                val content = (avg * total).coerceAtLeast(viewport.toFloat())
                 val first = visible.first()
-                val within = if (first.size > 0) (-first.offset).toFloat() / first.size else 0f
-                val scrollable = (total - visible.size).coerceAtLeast(1)
-                ((list.firstVisibleItemIndex + within) / scrollable).coerceIn(0f, 1f)
+                val scrolled = list.firstVisibleItemIndex * avg + (-first.offset).coerceAtLeast(0)
+                val maxScroll = (content - viewport).coerceAtLeast(1f)
+                (scrolled / maxScroll).coerceIn(0f, 1f) to (viewport / content).coerceIn(0f, 1f)
             }
         }
     }
-    // Компактная дорожка по центру справа (~треть экрана), а не на всю высоту.
-    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxHeight(0.32f).width(10.dp).padding(end = 2.dp)) {
-        val thumb = 28.dp
-        Box(Modifier.align(Alignment.TopCenter).fillMaxHeight().width(2.dp).background(color.copy(alpha = 0.18f), RoundedCornerShape(1.dp)))
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxHeight().width(6.dp).padding(end = 2.dp, top = 12.dp, bottom = 12.dp)) {
+        val (fraction, visibleShare) = metrics
+        val thumb = (maxHeight * visibleShare).coerceIn(40.dp, maxHeight)
+        Box(Modifier.align(Alignment.TopEnd).fillMaxHeight().width(2.dp).background(color.copy(alpha = 0.10f), RoundedCornerShape(1.dp)))
         Box(
-            Modifier.align(Alignment.TopCenter)
+            Modifier.align(Alignment.TopEnd)
                 .padding(top = (maxHeight - thumb) * fraction)
-                .height(thumb).width(4.dp)
-                .background(color.copy(alpha = 0.75f), RoundedCornerShape(2.dp)),
+                .height(thumb).width(2.dp)
+                .background(color.copy(alpha = 0.45f), RoundedCornerShape(1.dp)),
         )
     }
 }
