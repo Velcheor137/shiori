@@ -516,8 +516,9 @@ private fun ReadingScrollbar(list: androidx.compose.foundation.lazy.LazyListStat
             }
         }
     }
-    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxHeight().width(10.dp).padding(vertical = 8.dp)) {
-        val thumb = 44.dp
+    // Компактная дорожка по центру справа (~треть экрана), а не на всю высоту.
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxHeight(0.32f).width(10.dp).padding(end = 2.dp)) {
+        val thumb = 28.dp
         Box(Modifier.align(Alignment.TopCenter).fillMaxHeight().width(2.dp).background(color.copy(alpha = 0.18f), RoundedCornerShape(1.dp)))
         Box(
             Modifier.align(Alignment.TopCenter)
