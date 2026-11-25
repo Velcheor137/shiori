@@ -1,19 +1,23 @@
 pluginManagement {
     repositories {
+        google()
         gradlePluginPortal()
         mavenCentral()
-        google()
     }
 }
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        mavenCentral()
         google()
+        mavenCentral()
     }
 }
 
 rootProject.name = "shiori"
 
+include(":app")
+include(":core:network")
+include(":core:security")
+include(":data:auth")
 include(":engine:typography")

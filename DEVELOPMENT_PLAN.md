@@ -1865,7 +1865,7 @@ flowchart LR
 
 ### 14.4. Phase 1 — каркас и CI
 
-- [ ] **BOOT-001 — Каркас проекта** (M)
+- [~] **BOOT-001 — Каркас проекта** (M) — начато 2026-11-25: модули `app`, `core:network`, `core:security`, `data:auth`, `engine:typography`; AGP 9.5.2, `compileSdk` 37.2 (Compose 1.13 требует ≥ 37.1), `targetSdk` 36; build-logic, Hilt, дизайн-система — ещё нет.
   - Зависит: CP-0 (кроме no-go R1, каркас можно делать независимо).
   - Действия: Gradle wrapper, `settings.gradle.kts`, `gradle/libs.versions.toml` с версиями §4.3 (перепроверить), `build-logic` (convention plugins: `shiori.android.application`, `shiori.android.library`, `shiori.jvm.library`, `shiori.compose`), модули `app`, `core:model`, `core:designsystem`, `engine:document`, `engine:typography`; `minSdk 26`, `targetSdk` по §4.4; пустой экран «Shiori» с темой.
   - Проверка: `./gradlew assembleDebug testDebugUnitTest`.
@@ -1906,7 +1906,7 @@ flowchart LR
 - [ ] **READER-001 — Вертикальная читалка** (L) — `feature:reader`, `data:content`: загрузка главы (кэш/сеть), рендер IR (абзацы, курсив/жирный, картинки, разделители), панели, пред./след. по закреплённой ветке, состояния (недоступна, платная, удалена, офлайн). Базовые настройки: шрифт, размер, межстрочный, поля, тема. Тесты: UI + `ReaderNextChapterTest`.
 - [ ] **TYPO-001 — Нормализация v1** (L) — §9.4–9.7 (D1–D3, T, TY1), переключатель «Оригинал/Оформлено», кэш. Готово: метрики §9.7 выполнены.
 - [ ] **PROG-001 — Точный прогресс и «Продолжить»** (M) — §9.6, §10.1 (без синхронизации). Тест `ReaderProgressRestoreTest`.
-- [ ] **AUTH-001 — Вход/выход** (L) — Зависит: SPIKE-AUTH-001, RES-001 go. `data:auth`, `feature:auth`, `TokenVault`, refresh, `SessionManager`, `AccountKey`. Тесты: `TokenVaultTest` (Robolectric/instrumented), `AuthInterceptorTest`, instrumented вход на фейковой странице.
+- [~] **AUTH-001 — Вход/выход** (L) — начато 2026-11-25 по решению владельца (без ожидания RES-001): WebView входа на ranobelib.me, токен из `localStorage.auth` в `TokenVault`, `/api/auth/me`, refresh, выход; unit-тесты зелёные. Не проверено: реальный вход в аккаунт (делает владелец на своём телефоне). — Зависит: SPIKE-AUTH-001, RES-001 go. `data:auth`, `feature:auth`, `TokenVault`, refresh, `SessionManager`, `AccountKey`. Тесты: `TokenVaultTest` (Robolectric/instrumented), `AuthInterceptorTest`, instrumented вход на фейковой странице.
 - [ ] **COM-001 — Комментарии главы (текущий перевод)** (M) — Зависит: SPIKE-COM-001. `data:comments`, `feature:comments`: лента, ответы, спойлеры, безопасный рендер.
 - [ ] **VS-001 — Сквозная проверка среза** (S) — сценарий: вход → поиск → закрепить переводчика → глава → тире/ёлочки → закрыть посреди абзаца → вернуться → комментарии. Готово: пройден вручную на устройстве + instrumented-сценарий с фейковым сервером.
 - [ ] **CP-2** — вертикальный срез работает.
@@ -2052,6 +2052,7 @@ flowchart LR
 | DEC-013 | 2026-11-25 | Экспорт EPUB/FB2 не реализуется (премиум-функция сайта) | F-22 | принято |
 | DEC-014 | 2026-11-25 | Никакой телеметрии и сторонних SDK; отчёт для поддержки формирует пользователь | §11.4 | принято |
 | DEC-015 | 2026-11-25 | Релизы: тег `v*` на `main` → подписанный APK + SHA-256 в GitHub Releases, без перезаписи | §13 | принято |
+| DEC-016 | 2026-11-25 | Проверки только на Android 16 (API 36): один эмулятор, без матрицы версий (§12.3 и `nightly.yml` сокращаются до API 36) | решение владельца | принято |
 
 ### 17.3. Источники по API и клиентам (проверено 2026-11-25)
 
