@@ -1,6 +1,7 @@
 package io.github.velcheor137.shiori
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -188,7 +189,7 @@ class CommentsViewModel(private val app: ShioriApp, private val sources: List<So
 fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, currentChapterId: Long) {
     val context = LocalContext.current
     val app = context.shiori
-    val labels = app.branchLabels[slug].orEmpty()
+    val labels = remember(slug) { app.branchLabels[slug] ?: branchInfos(app.chapterCache[slug].orEmpty()).associate { it.branchId to it.name } }
     val sources = remember(entry) {
         entry.versions.map { v ->
             val label = labels[v.branchId] ?: v.teamNames.joinToString().ifBlank { v.uploader ?: "Перевод без подписи" }
@@ -312,7 +313,7 @@ private fun CommentItem(c: Comment, tag: String?, indent: Boolean, onVote: (Int)
                 tag?.let { Text("  · $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
             }
             c.createdAt?.let { Text(it.take(16).replace('T', ' '), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            Text(c.text, style = MaterialTheme.typography.bodyMedium)
+            CommentBody(c)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val score = (c.votesUp ?: 0) - (c.votesDown ?: 0)
                 IconButton(onClick = { onVote(1) }, modifier = Modifier.size(36.dp)) {
@@ -332,6 +333,36 @@ private fun CommentItem(c: Comment, tag: String?, indent: Boolean, onVote: (Int)
                 }
                 TextButton(onClick = onReply) { Text("Ответить") }
             }
+        }
+    }
+}
+
+/** Тело комментария: абзацы текста и картинки (сайт присылает HTML с <img>, превью — webp). */
+@Composable
+private fun CommentBody(c: Comment) {
+    if (c.blocks.isEmpty()) {
+        if (c.text.isNotBlank()) Text(c.text, style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+    var full by remember { mutableStateOf<String?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        c.blocks.forEach { b ->
+            when (b) {
+                is io.github.velcheor137.shiori.engine.document.Paragraph -> if (b.text.isNotBlank()) Text(b.text, style = MaterialTheme.typography.bodyMedium)
+                is io.github.velcheor137.shiori.engine.document.ImageBlock -> AsyncImage(
+                    model = b.url,
+                    contentDescription = "Картинка в комментарии",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                        .clickable { full = b.url },
+                )
+                io.github.velcheor137.shiori.engine.document.Separator -> HorizontalDivider()
+            }
+        }
+    }
+    full?.let { url ->
+        androidx.compose.ui.window.Dialog(onDismissRequest = { full = null }) {
+            AsyncImage(url, null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().clickable { full = null })
         }
     }
 }

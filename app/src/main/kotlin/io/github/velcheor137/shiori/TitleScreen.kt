@@ -74,7 +74,7 @@ class TitleViewModel(private val app: ShioriApp, private val slug: String) : Vie
                 val title = titleJob.await().also { app.titleCache[slug] = it.card }
                 val branches = branchesOf(title, chapters)
                 val branchId = resolveBranch(title, branches)
-                app.branchLabels[slug] = branches.associate { it.branchId to it.label }
+                app.branchLabels[slug] = branchInfos(chapters, title).associate { it.branchId to it.name }
                 AppLog.i("TITLE", "Тайтл ${title.card.id} «${title.card.name}»: глав ${chapters.size}, переводов ${branches.size}, выбран перевод $branchId")
                 Data(title, chapters, branches, branchId)
             }.onSuccess { state.value = Load.Ready(it) }
@@ -128,20 +128,27 @@ fun TitleScreen(nav: NavController, slug: String) {
             val d = s.value
             val progress = allProgress.firstOrNull { it.titleId == d.title.card.id && it.branchId == d.branchId }
             val branchChapters = remember(d.chapters, d.branchId) { d.chapters.filter { it.version(d.branchId) != null } }
+            val infos = remember(d.chapters) { branchInfos(d.chapters, d.title) }
+            val infoMap = remember(infos) { infos.associateBy { it.branchId } }
             var tab by rememberSaveable { mutableStateOf(0) }
-            var descending by rememberSaveable { mutableStateOf(false) }
+            var descending by rememberSaveable { mutableStateOf(true) }
             var query by rememberSaveable { mutableStateOf("") }
+            var filter by rememberSaveable { mutableStateOf<Long?>(null) }
             val context = LocalContext.current
-            val downloaded = remember(d.title.card.id, allProgress) { DownloadFiles.downloadedIds(context, d.title.card.id) }
-            val ordered = if (descending) branchChapters.reversed() else branchChapters
+            val queue by app.store.downloads.collectAsStateWithLifecycle()
+            val downloaded = remember(d.title.card.id, allProgress, queue) { DownloadFiles.downloadedIds(context, d.title.card.id) }
+            val base = remember(d.chapters, filter) { if (filter == null) d.chapters else d.chapters.filter { it.version(filter!!) != null } }
+            val ordered = if (descending) base.reversed() else base
             val shown = remember(ordered, query) { filterChapters(ordered, query) }
             val list = rememberLazyListState()
             val scope = rememberCoroutineScope()
             val currentIndex = progress?.let { p -> shown.indexOfFirst { it.volume == p.volume && it.number == p.number } } ?: -1
 
-            fun open(c: ChapterEntry, restore: Boolean = false) {
-                app.store.pinBranch(d.title.card.id, d.branchId)
-                nav.navigate(Routes.reader(slug, d.branchId, c.volume, c.number, restore))
+            fun open(c: ChapterEntry, branch: Long = d.branchId, restore: Boolean = false) {
+                // Другой перевод — только по явному выбору пользователя: он становится закреплённым.
+                if (branch != d.branchId) vm.pin(branch)
+                app.store.pinBranch(d.title.card.id, branch)
+                nav.navigate(Routes.reader(slug, branch, c.volume, c.number, restore))
             }
 
             LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
@@ -156,7 +163,14 @@ fun TitleScreen(nav: NavController, slug: String) {
                             Button(onClick = { open(branchChapters.first()) }, modifier = Modifier.fillMaxWidth()) { Text("Начать читать") }
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f)) { if (d.branches.isNotEmpty()) BranchPicker(d.branches, d.branchId, vm::pin) }
+                            Text(
+                                "Читаю перевод: ${infoMap[d.branchId]?.name ?: "—"}",
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                             TextButton(onClick = { app.store.pinBranch(d.title.card.id, d.branchId); nav.navigate(Routes.download(slug)) }) {
                                 Icon(AppIcons.Download, null, Modifier.size(18.dp))
                                 Text(" Скачать")
@@ -167,18 +181,18 @@ fun TitleScreen(nav: NavController, slug: String) {
                 item {
                     PrimaryTabRow(selectedTabIndex = tab) {
                         Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("О тайтле") })
-                        Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Главы ${branchChapters.size}") })
+                        Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Главы ${d.chapters.size}") })
                     }
                 }
                 if (tab == 0) {
                     item { About(d.title) }
                 } else {
+                    item { TeamChips(infos, pinned = d.branchId, filter = filter) { filter = it } }
                     item {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                             TextButton(onClick = { descending = !descending }) { Text(if (descending) "Сначала новые ↓" else "Сначала старые ↑") }
                             if (currentIndex >= 0) {
-                                val offset = 5 + if (branchChapters.size < d.chapters.size) 1 else 0
-                                TextButton(onClick = { scope.launch { list.animateScrollToItem(currentIndex + offset) } }) { Text("К текущей главе") }
+                                TextButton(onClick = { scope.launch { list.animateScrollToItem(currentIndex + 6) } }) { Text("К текущей главе") }
                             }
                         }
                     }
@@ -191,21 +205,20 @@ fun TitleScreen(nav: NavController, slug: String) {
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                         )
                     }
-                    if (branchChapters.size < d.chapters.size) {
-                        item {
-                            Text(
-                                "В этом переводе нет ${d.chapters.size - branchChapters.size} глав из ${d.chapters.size}. Другой перевод не подставляется.",
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    items(shown, key = { it.apiId }) { c ->
-                        val v = c.version(d.branchId)!!
-                        val isCurrent = progress != null && progress.volume == c.volume && progress.number == c.number
-                        ChapterRow(c, v.createdAt, isCurrent, locked = !v.isOpen, downloaded = v.versionId in downloaded) { open(c, restore = isCurrent) }
-                    }
+                    chapterTree(
+                        chapters = shown,
+                        infos = infoMap,
+                        pinned = d.branchId,
+                        filter = filter,
+                        current = progress?.let { it.volume to it.number },
+                        downloaded = downloaded,
+                        onOpen = { c, b -> open(c, b, restore = progress != null && b == progress.branchId && c.volume == progress.volume && c.number == progress.number) },
+                        onDownload = { c, b ->
+                            val v = c.version(b) ?: return@chapterTree
+                            Downloader.enqueue(context, listOf(DownloadTask(d.title.card.id, slug, d.title.card.name, b, c.volume, c.number, v.versionId, withImages = true)), wifiOnly = false)
+                            android.widget.Toast.makeText(context, "Глава добавлена в загрузки", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                    )
                 }
                 item { Spacer(Modifier.height(24.dp)) }
             }

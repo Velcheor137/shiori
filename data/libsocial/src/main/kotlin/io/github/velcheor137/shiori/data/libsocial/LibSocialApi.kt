@@ -89,6 +89,7 @@ class LibSocialApi(private val http: LibSocialHttp) {
                         isOpen = bo.obj("restricted_view")?.bool("is_open") ?: true,
                         teamNames = bo.arr("teams").names(),
                         uploader = bo.obj("user")?.str("username"),
+                        teamCovers = bo.arr("teams").mapNotNull { t -> (t as? JsonObject)?.obj("cover")?.let { it.str("thumbnail") ?: it.str("default") } },
                     )
                 },
             )
@@ -210,7 +211,8 @@ class LibSocialApi(private val http: LibSocialHttp) {
             author = user?.str("username") ?: "—",
             avatar = avatar,
             createdAt = str("created_at"),
-            text = richText(this["comment"]).ifBlank { str("comment").orEmpty() },
+            blocks = DocumentParser.parse(this["comment"]?.takeIf { it !is JsonNull }, emptyList()),
+            text = richText(this["comment"]),
             votesUp = votes?.int("up") ?: votes?.int("likes") ?: int("votes_up"),
             votesDown = votes?.int("down") ?: votes?.int("dislikes"),
             repliesCount = int("replies_count") ?: 0,

@@ -64,6 +64,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -196,6 +205,25 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
     ScreenEffects(settings)
     // Панели прячутся, как только начинается прокрутка; показываются по тапу.
     LaunchedEffect(list) { snapshotFlow { list.isScrollInProgress }.collect { if (it) bars = false } }
+    // Системные панели (часы, навигация) показываются и прячутся вместе с панелями читалки — без рывков.
+    val view = LocalView.current
+    val activity = LocalContext.current as? Activity
+    val controller = remember(activity) {
+        activity?.window?.let { WindowCompat.getInsetsController(it, view) }?.apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+    LaunchedEffect(bars, sheet) {
+        if (bars || sheet != Sheet.None) controller?.show(WindowInsetsCompat.Type.systemBars())
+        else controller?.hide(WindowInsetsCompat.Type.systemBars())
+    }
+    LaunchedEffect(settings.theme, settings.customBackground) {
+        val bg = colors.background
+        val light = (0.299f * bg.red + 0.587f * bg.green + 0.114f * bg.blue) > 0.5f
+        controller?.isAppearanceLightStatusBars = light
+        controller?.isAppearanceLightNavigationBars = light
+    }
+    DisposableEffect(controller) { onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) } }
 
     fun goTo(c: ChapterEntry, toBranch: Long = branchId) {
         if (toBranch != branchId) {
@@ -224,9 +252,14 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
             )
         }
         val ready = (state as? Load.Ready)?.value
-        AnimatedVisibility(bars, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
+        AnimatedVisibility(
+            bars,
+            enter = slideInVertically(tween(220)) { -it } + fadeIn(tween(220)),
+            exit = slideOutVertically(tween(200)) { -it } + fadeOut(tween(200)),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
             Row(
-                Modifier.fillMaxWidth().background(colors.panel).padding(horizontal = 4.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().background(colors.panel).windowInsetsPadding(WindowInsets.statusBars).padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", tint = colors.text) }
@@ -241,9 +274,14 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
                 }
             }
         }
-        AnimatedVisibility(bars, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
+        AnimatedVisibility(
+            bars,
+            enter = slideInVertically(tween(220)) { it } + fadeIn(tween(220)),
+            exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(200)),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
             Row(
-                Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth()
+                Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth()
                     .background(colors.panel.copy(alpha = 0.96f), RoundedCornerShape(16.dp)).padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically,
@@ -270,7 +308,6 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
                 Sheet.Settings -> ReaderSettingsPanel(settings) { t -> app.store.updateSettings(t) }
                 Sheet.Chapters -> ChaptersPanel(
                     all = app.chapterCache[slug].orEmpty(),
-                    labels = app.branchLabels[slug].orEmpty(),
                     initialBranch = branchId,
                     current = volume to number,
                     downloaded = d?.let { DownloadFiles.downloadedIds(app, it.title.id) }.orEmpty(),
@@ -303,13 +340,6 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
 private fun ScreenEffects(settings: ReaderSettings) {
     val view = LocalView.current
     val activity = LocalContext.current as? Activity
-    // Полный экран: прячем строку состояния и навигацию, вызываются свайпом от края.
-    DisposableEffect(Unit) {
-        val controller = activity?.window?.let { WindowCompat.getInsetsController(it, view) }
-        controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        controller?.hide(WindowInsetsCompat.Type.systemBars())
-        onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) }
-    }
     DisposableEffect(settings.keepScreenOn) {
         view.keepScreenOn = settings.keepScreenOn
         onDispose { view.keepScreenOn = false }
@@ -421,7 +451,7 @@ private fun ChapterText(
                     fontWeight = FontWeight.Bold,
                     fontSize = (settings.fontSize * 1.45f).sp,
                     lineHeight = (settings.fontSize * 1.8f).sp,
-                    modifier = Modifier.padding(top = 76.dp, bottom = 16.dp),
+                    modifier = Modifier.padding(top = 104.dp, bottom = 16.dp),
                 )
             }
             if (d.chapter.restricted) {
@@ -465,14 +495,36 @@ private fun ChapterText(
             }
         }
       }
-        if (settings.showProgress) {
-            Text(
-                "$progress%",
-                color = colors.secondary,
-                fontSize = 11.sp,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 10.dp, bottom = 4.dp),
-            )
+        if (settings.showProgress) ReadingScrollbar(list, colors.secondary, Modifier.align(Alignment.CenterEnd))
+    }
+}
+
+/** Полоса прочитанного справа (как на RanobeLib): тонкая дорожка и бегунок по положению в главе. */
+@Composable
+private fun ReadingScrollbar(list: androidx.compose.foundation.lazy.LazyListState, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
+    val fraction by remember {
+        derivedStateOf {
+            val info = list.layoutInfo
+            val total = info.totalItemsCount
+            val visible = info.visibleItemsInfo
+            if (total == 0 || visible.isEmpty()) 0f
+            else {
+                val first = visible.first()
+                val within = if (first.size > 0) (-first.offset).toFloat() / first.size else 0f
+                val scrollable = (total - visible.size).coerceAtLeast(1)
+                ((list.firstVisibleItemIndex + within) / scrollable).coerceIn(0f, 1f)
+            }
         }
+    }
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxHeight().width(10.dp).padding(vertical = 8.dp)) {
+        val thumb = 44.dp
+        Box(Modifier.align(Alignment.TopCenter).fillMaxHeight().width(2.dp).background(color.copy(alpha = 0.18f), RoundedCornerShape(1.dp)))
+        Box(
+            Modifier.align(Alignment.TopCenter)
+                .padding(top = (maxHeight - thumb) * fraction)
+                .height(thumb).width(4.dp)
+                .background(color.copy(alpha = 0.75f), RoundedCornerShape(2.dp)),
+        )
     }
 }
 

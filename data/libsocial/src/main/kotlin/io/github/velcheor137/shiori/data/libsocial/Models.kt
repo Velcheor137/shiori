@@ -42,6 +42,7 @@ data class ChapterVersion(
     val isOpen: Boolean,
     val teamNames: List<String>,
     val uploader: String?,
+    val teamCovers: List<String> = emptyList(),
 )
 
 data class ChapterEntry(
@@ -76,6 +77,8 @@ data class Comment(
     val avatar: String?,
     val createdAt: String?,
     val text: String,
+    /** Текст и картинки комментария (HTML или ProseMirror → общая модель). */
+    val blocks: List<io.github.velcheor137.shiori.engine.document.Block> = emptyList(),
     val votesUp: Int?,
     val votesDown: Int?,
     val repliesCount: Int,

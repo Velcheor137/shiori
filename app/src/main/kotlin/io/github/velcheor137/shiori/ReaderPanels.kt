@@ -53,72 +53,54 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.velcheor137.shiori.data.libsocial.ChapterEntry
 
-/** Список глав с выбором переводчика (как на RanobeLib) и поиском по номеру или названию (§10.2). */
-@OptIn(ExperimentalLayoutApi::class)
+/** Список глав как на RanobeLib: команды с аватарами, под каждой главой — её переводы; поиск по номеру/названию. */
 @Composable
 fun ChaptersPanel(
     all: List<ChapterEntry>,
-    labels: Map<Long, String>,
     initialBranch: Long,
     current: Pair<String, String>,
     downloaded: Set<Long>,
     onPick: (ChapterEntry, Long) -> Unit,
 ) {
-    var branchId by remember { mutableStateOf(initialBranch) }
     var query by remember { mutableStateOf("") }
-    val branches = remember(all) {
-        all.flatMap { c -> c.versions.map { it.branchId } }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key to it.value }
+    var filter by remember { mutableStateOf<Long?>(null) }
+    var descending by remember { mutableStateOf(false) }
+    val infos = remember(all) { branchInfos(all) }
+    val infoMap = remember(infos) { infos.associateBy { it.branchId } }
+    val base = remember(all, filter, descending) {
+        val f = if (filter == null) all else all.filter { it.version(filter!!) != null }
+        if (descending) f.reversed() else f
     }
-    val chapters = remember(all, branchId) { all.filter { it.version(branchId) != null } }
-    val filtered = remember(query, chapters) { filterChapters(chapters, query) }
+    val filtered = remember(query, base) { filterChapters(base, query) }
     val list = rememberLazyListState()
-    LaunchedEffect(Unit) {
-        val i = chapters.indexOfFirst { it.volume == current.first && it.number == current.second }
-        if (i > 3) list.scrollToItem(i - 3)
+    LaunchedEffect(filtered.size, descending) {
+        val i = filtered.indexOfFirst { it.volume == current.first && it.number == current.second }
+        if (i > 1) list.scrollToItem(i - 1)
     }
-    Column(Modifier.fillMaxWidth().heightIn(max = 640.dp)) {
-        if (branches.size > 1) {
-            Text("Переводчик", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelLarge)
-            FlowRow(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                branches.forEach { (id, count) ->
-                    FilterChip(selected = id == branchId, onClick = { branchId = id }, label = { Text("${labels[id] ?: "Перевод $id"} · $count") })
-                }
-            }
-            if (branchId != initialBranch) {
-                Text(
-                    "Выбор главы в этом списке сменит закреплённый перевод.",
-                    Modifier.padding(horizontal = 16.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
+    Column(Modifier.fillMaxWidth().heightIn(max = 680.dp)) {
+        Text("Список глав", Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        TeamChips(infos, pinned = initialBranch, filter = filter) { filter = it }
+        Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Поиск главы") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { descending = !descending }) { Text(if (descending) "↓ новые" else "↑ старые") }
         }
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text("Поиск главы: номер или название") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        )
-        Text("Глав в переводе: ${chapters.size}", Modifier.padding(16.dp, 6.dp), style = MaterialTheme.typography.bodySmall)
         LazyColumn(state = list) {
-            items(filtered, key = { it.apiId }) { c ->
-                val isCurrent = branchId == initialBranch && c.volume == current.first && c.number == current.second
-                val v = c.version(branchId)
-                Row(Modifier.fillMaxWidth().clickable { onPick(c, branchId) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        c.label,
-                        Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                    )
-                    if (v != null && v.versionId in downloaded) Icon(AppIcons.Download, "Скачано", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (v?.isOpen == false) Text(" платная", style = MaterialTheme.typography.labelSmall)
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-            }
+            chapterTree(
+                chapters = filtered,
+                infos = infoMap,
+                pinned = initialBranch,
+                filter = filter,
+                current = current,
+                downloaded = downloaded,
+                onOpen = onPick,
+                onDownload = null,
+            )
         }
     }
 }
