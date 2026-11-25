@@ -84,14 +84,29 @@ jobs:
             echo "::error::Нет секрета ANDROID_KEYSTORE_BASE64 в окружении release (см. README / DEVELOPMENT_PLAN §13.7)"; exit 1
           fi
           umask 077
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          # Пробелы и переводы строк при вставке в секрет допустимы — убираем их перед декодированием.
+          if ! printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \r\n\t' | base64 --decode > "$RUNNER_TEMP/release.jks" 2>/dev/null; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 — не base64 (длина ${#ANDROID_KEYSTORE_BASE64} симв.). Пересоздайте: base64 -w0 shiori-release.jks (macOS: base64 -i shiori-release.jks) и вставьте вывод целиком"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$RUNNER_TEMP/release.jks")
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "::error::После декодирования ключ слишком мал ($SIZE байт) — в секрете не содержимое .jks"
+            exit 1
+          fi
+          echo "Ключ раскодирован: $SIZE байт"
       - name: Build signed APK
         env:
           SHIORI_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
           SHIORI_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           SHIORI_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           SHIORI_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleRelease -PreleaseVersion=${{ needs.verify.outputs.version }}
+        run: |
+          if ! keytool -list -keystore "$SHIORI_KEYSTORE_PATH" -storepass "$SHIORI_KEYSTORE_PASSWORD" -alias "$SHIORI_KEY_ALIAS" > /dev/null 2>&1; then
+            echo "::error::Не открыть ключ: проверьте ANDROID_KEYSTORE_PASSWORD и ANDROID_KEY_ALIAS (alias должен совпадать с указанным при создании)"
+            exit 1
+          fi
+          ./gradlew --no-daemon assembleRelease -PreleaseVersion=${{ needs.verify.outputs.version }}
       - name: Remove keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
