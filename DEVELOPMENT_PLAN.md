@@ -1889,9 +1889,9 @@ flowchart LR
   - Действия: Gradle wrapper, `settings.gradle.kts`, `gradle/libs.versions.toml` с версиями §4.3 (перепроверить), `build-logic` (convention plugins: `shiori.android.application`, `shiori.android.library`, `shiori.jvm.library`, `shiori.compose`), модули `app`, `core:model`, `core:designsystem`, `engine:document`, `engine:typography`; `minSdk 26`, `targetSdk` по §4.4; пустой экран «Shiori» с темой.
   - Проверка: `./gradlew assembleDebug testDebugUnitTest`.
   - Готово: APK запускается на эмуляторе API 26 и 36.
-- [ ] **CI-001 — `ci.yml`** (S) — Зависит: BOOT-001. Действия: файл §13.3, ktlint-плагин, Android Lint baseline. Готово: зелёный прогон на PR, артефакт debug APK.
+- [~] **CI-001 — `ci.yml`** (S) — Зависит: BOOT-001. Действия: файл §13.3, ktlint-плагин, Android Lint baseline. Готово: зелёный прогон на PR, артефакт debug APK. — 2026-11-25: `.github/workflows/ci.yml` (тесты, Android Lint без блокировки, debug-APK артефактом, проверка wrapper; actions на SHA); первый прогон на GitHub — после пуша
 - [ ] **CI-002 — Защита main** (S, владелец, M6–M7). Готово: rulesets включены, проверка обязательна.
-- [ ] **DOC-001 — Документы репозитория** (S) — `README.md`, `LICENSE` (после M9), `NOTICE`, `PRIVACY.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.gitignore` (§13.8), `docs/licenses.md`, шаблон PR, `CODEOWNERS`. Готово: ревью владельца.
+- [~] **DOC-001 — Документы репозитория** (S) — `README.md`, `LICENSE` (после M9), `NOTICE`, `PRIVACY.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.gitignore` (§13.8), `docs/licenses.md`, шаблон PR, `CODEOWNERS`. Готово: ревью владельца. — 2026-11-25: `LICENSE` (GPL-3.0), `README.md`, `CHANGELOG.md`. Нет: `PRIVACY.md`, `SECURITY.md`, `CONTRIBUTING.md`, `docs/licenses.md`
 - [ ] **CI-003 — `nightly.yml`** (S) — Зависит: первые instrumented-тесты. Готово: прогон на 3 API.
 - [ ] **CP-1** — собираемый каркас, CI обязателен, документы на месте.
 
@@ -1948,9 +1948,9 @@ flowchart LR
 - [ ] **SEC-001 — Проверка безопасности** (S) — логи, бэкап, allowlist, WebView-настройки, `network_security_config`; ручной аудит + тесты.
 - [ ] **DIAG-001 — «Проверка сервиса» и отчёт для поддержки** (S) — §11.4–11.5.
 - [ ] **PERF-001 — Baseline Profile и бенчмарки** (M) — `baselineprofile`, `benchmark`, цели §12.5.
-- [ ] **REL-001 — Подпись релиза** (S) — `signingConfigs`, вычисление `versionCode`, M1–M5. Проверка: локальная `assembleRelease` с тестовым ключом.
-- [ ] **REL-002 — `release.yml`** (M) — §13.5; тест через `workflow_dispatch` с `dry_run: true` на теге `v0.1.0-rc.1`.
-- [ ] **CI-004 — Dependabot и пиннинг** (S) — §13.6, все actions на SHA.
+- [~] **REL-001 — Подпись релиза** (S) — `signingConfigs`, вычисление `versionCode`, M1–M5. Проверка: локальная `assembleRelease` с тестовым ключом. — 2026-11-25: `signingConfigs` из `SHIORI_KEYSTORE_*`, `versionCode`/`versionName` из `-PreleaseVersion` (проверено с временным ключом). Осталось владельцу: M1–M5 (ключ, резервная копия, секреты, окружение `release`)
+- [~] **REL-002 — `release.yml`** (M) — §13.5; тест через `workflow_dispatch` с `dry_run: true` на теге `v0.1.0-rc.1`. — 2026-11-25: verify → build-signed (окружение `release`, сверка сертификата с `EXPECTED_CERT_SHA256`, `aapt2`, SHA-256) → publish (`gh release create`, без перезаписи). Без эмуляторного smoke. Не запускался: нет секретов
+- [~] **CI-004 — Dependabot и пиннинг** (S) — §13.6, все actions на SHA. — 2026-11-25: `.github/dependabot.yml` (gradle + actions), все actions закреплены на SHA
 - [ ] **CI-005 — Безопасность репозитория** (S, владелец M8).
 - [ ] **UPGRADE-001 — Тест обновления APK** (S) — из `0.1.0-rc.1` в `0.1.0`.
 - [ ] **UX-001 — Юзабилити-проверка** (S, владелец) — §10.7.
@@ -2041,7 +2041,7 @@ flowchart LR
 
 | ID | Вопрос | Почему важно | Как разрешить | Следующий шаг / ответственный |
 | --- | --- | --- | --- | --- |
-| Q1 | Лицензия проекта: GPL-3.0-or-later (рекомендация) или иная? | влияет на форки и `LICENSE` | решение владельца | владелец, до `DOC-001` |
+| Q1 | ~~Лицензия проекта~~ — решено: GPL-3.0-or-later (DEC-007) | — | — | закрыт 2026-11-25 |
 | Q2 | Разрешают ли правила RanobeLib сторонние клиенты, вход через встроенный браузер и офлайн-кэш? | R2, R6 | `RES-001` | владелец |
 | Q3 | Пропускает ли гейт честный `User-Agent` с `Referer`? | R1 | `RES-003` (3 запроса, с разрешения владельца) | Claude, следующая сессия |
 | Q4 | Совпадает ли `chapter.id` из `/chapter` с `branches[].id` (H-COM-1)? Доступны ли комментарии гостю? Есть ли абзацные комментарии у ранобэ? | §10.4 | `RES-002`, `SPIKE-COM-001` | владелец → Claude |
@@ -2062,7 +2062,7 @@ flowchart LR
 | DEC-004 | 2026-11-25 | `applicationId = io.github.velcheor137.shiori`, имя Shiori, плашка «неофициальный клиент» | §1.5 | принято (владелец может изменить до первого релиза; после — нельзя) |
 | DEC-005 | 2026-11-25 | Библиотеки и версии §4.3 | §4.3 | принято, перепроверить в `BOOT-001` |
 | DEC-006 | 2026-11-25 | `minSdk 26`, `targetSdk` — последний стабильный, поддерживаемый AGP | §4.4 | принято |
-| DEC-007 | 2026-11-25 | Лицензия GPL-3.0-or-later | §4.5 | предложено, ждёт Q1 |
+| DEC-007 | 2026-11-25 | Лицензия GPL-3.0-or-later | §4.5, решение владельца | принято |
 | DEC-008 | 2026-11-25 | Не подменять `User-Agent` на браузерный; при блокировке честного UA — остановка и обращение к сервису | R-FAIR, §3.1 R1 | принято |
 | DEC-009 | 2026-11-25 | Вход — только через страницу сайта во WebView, без своей формы логина; токен из `localStorage.auth` | §10.0, F-14/F-15 | условно (до `RES-001`) |
 | DEC-010 | 2026-11-25 | Всегда передавать `branch_id`; `BranchPolicy` — единственный путь к версии главы; без автоподмены перевода | §10.3, F-10 | принято |
@@ -2073,6 +2073,7 @@ flowchart LR
 | DEC-015 | 2026-11-25 | Релизы: тег `v*` на `main` → подписанный APK + SHA-256 в GitHub Releases, без перезаписи | §13 | принято |
 | DEC-017 | 2026-11-25 | Режим текста называется «Оригинал / Литературный» и выбирается в настройках читалки; «Литературный» = расширенный набор правил (L1–L4 + прямые кавычки) | решение владельца | принято |
 | DEC-018 | 2026-11-25 | Тема приложения: тёмная по умолчанию (цвета читалки «Как на сайте»), светлая и системная — в профиле; акцент мягкий фиолетовый; иконка — белая «S» на фиолетовом | решение владельца | принято |
+| DEC-019 | 2026-11-25 | В release-сборке подробный журнал в файл не пишется: только предупреждения и ошибки в памяти сессии; полный журнал — в debug | §11.4 | принято |
 | DEC-016 | 2026-11-25 | Проверки только на Android 16 (API 36): один эмулятор, без матрицы версий (§12.3 и `nightly.yml` сокращаются до API 36) | решение владельца | принято |
 
 ### 17.3. Источники по API и клиентам (проверено 2026-11-25)

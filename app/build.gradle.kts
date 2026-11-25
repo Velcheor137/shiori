@@ -1,3 +1,26 @@
+/**
+ * Версия релиза приходит из тега: `-PreleaseVersion=1.2.3[-alpha.N|-beta.N|-rc.N]` (§13.2 плана).
+ * versionCode = MAJOR*1_000_000 + MINOR*10_000 + PATCH*100 + STAGE (alpha 1–29, beta 31–59, rc 61–89, финал 99).
+ */
+val releaseVersion: String? = providers.gradleProperty("releaseVersion").orNull
+
+fun versionCodeOf(version: String): Int {
+    val m = Regex("""^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$""").matchEntire(version)
+        ?: error("Неверная версия «$version»: ожидается X.Y.Z или X.Y.Z-(alpha|beta|rc).N")
+    val (major, minor, patch, stage, n) = m.destructured
+    val num = n.toIntOrNull() ?: 0
+    require(stage.isEmpty() || num in 1..29) { "Номер предрелиза должен быть 1..29" }
+    val stageCode = when (stage) {
+        "alpha" -> num
+        "beta" -> 30 + num
+        "rc" -> 60 + num
+        else -> 99
+    }
+    return major.toInt() * 1_000_000 + minor.toInt() * 10_000 + patch.toInt() * 100 + stageCode
+}
+
+val keystorePath: String? = System.getenv("SHIORI_KEYSTORE_PATH")
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -14,14 +37,38 @@ android {
         applicationId = "io.github.velcheor137.shiori"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.3.2-dev"
+        versionCode = releaseVersion?.let(::versionCodeOf) ?: 7
+        versionName = releaseVersion ?: "0.3.2-dev"
+    }
+
+    signingConfigs {
+        // Ключ подписи — только из окружения (GitHub Secrets в release.yml или локально), никогда из репозитория.
+        if (keystorePath != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("SHIORI_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("SHIORI_KEY_ALIAS")
+                keyPassword = System.getenv("SHIORI_KEY_PASSWORD")
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
         }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+        }
+    }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
     }
 
     buildFeatures {

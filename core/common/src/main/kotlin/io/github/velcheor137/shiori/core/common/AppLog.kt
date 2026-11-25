@@ -14,11 +14,23 @@ object AppLog {
     private val time = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
     private var file: File? = null
     private val memory = ArrayDeque<String>()
+    private var verbose = true
 
+    /**
+     * @param persist писать ли журнал в файл. В release-сборке — нет (§11.4): только предупреждения и ошибки
+     * в памяти текущей сессии; старый файл журнала удаляется.
+     */
     @Synchronized
-    fun init(dir: File) {
-        dir.mkdirs()
-        file = File(dir, "shiori.log")
+    fun init(dir: File, persist: Boolean = true) {
+        verbose = persist
+        if (persist) {
+            dir.mkdirs()
+            file = File(dir, "shiori.log")
+        } else {
+            file = null
+            File(dir, "shiori.log").delete()
+            File(dir, "shiori.log.1").delete()
+        }
     }
 
     val logFile: File? get() = file
@@ -41,6 +53,7 @@ object AppLog {
 
     @Synchronized
     private fun write(level: String, tag: String, message: String, error: Throwable?) {
+        if (!verbose && level == "I") return
         val line = buildString {
             append(LocalDateTime.now().format(time)).append(' ').append(level).append(' ').append(tag).append(": ")
             append(Redactor.redact(message))

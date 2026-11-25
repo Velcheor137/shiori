@@ -40,7 +40,8 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
-        AppLog.init(File(filesDir, "logs"))
+        // Полный журнал в файл — только в debug-сборке; в release лишь предупреждения/ошибки в памяти (§11.4).
+        AppLog.init(File(filesDir, "logs"), persist = BuildConfig.DEBUG)
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             AppLog.e("CRASH", "Необработанное исключение в потоке ${thread.name}", error)

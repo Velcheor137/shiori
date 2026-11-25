@@ -63,7 +63,14 @@ fun LogScreen(onBack: () -> Unit) {
 }
 
 private fun share(context: Context) {
-    val file = AppLog.logFile?.takeIf { it.exists() } ?: return Toast.makeText(context, "Журнал пуст", Toast.LENGTH_SHORT).show()
+    val file = AppLog.logFile?.takeIf { it.exists() }
+    if (file == null) {
+        // Release-сборка: журнал только в памяти (предупреждения и ошибки сессии) — отправляем текстом.
+        val text = AppLog.read()
+        if (text.isBlank()) return Toast.makeText(context, "Журнал пуст", Toast.LENGTH_SHORT).show()
+        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text.takeLast(100_000)), "Отправить журнал"))
+        return
+    }
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.logs", file)
     val intent = Intent(Intent.ACTION_SEND)
         .setType("text/plain")
