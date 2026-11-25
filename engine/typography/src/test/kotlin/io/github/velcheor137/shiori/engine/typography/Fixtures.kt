@@ -18,7 +18,7 @@ data class Fixture(
 
 object Fixtures {
     private const val NBSP_MARK = '⍽'
-    private val files = listOf("dialogue.txt", "thoughts.txt", "negative.txt", "known.txt")
+    private val files = listOf("dialogue.txt", "thoughts.txt", "negative.txt", "known.txt", "literary.txt")
 
     fun all(): List<Fixture> = files.flatMap { load(it) }
 
@@ -51,9 +51,9 @@ object Fixtures {
         return result
     }
 
-    private fun decode(s: String) = s.replace(NBSP_MARK, Chars.NBSP)
+    private fun decode(s: String) = s.replace(NBSP_MARK, Chars.NBSP).replace('⏎', '\n')
 
-    fun encode(s: String) = s.replace(Chars.NBSP, NBSP_MARK)
+    fun encode(s: String) = s.replace(Chars.NBSP, NBSP_MARK).replace('\n', '⏎')
 
     private fun parse(file: String, header: String, input: String, expected: String): Fixture {
         val parts = header.split("|").map { it.trim() }
@@ -69,6 +69,7 @@ object Fixtures {
             thoughts = "thoughts" in rules,
             straightQuotesAsSpeech = "straight" in opts,
             nbspAroundDialogueDash = "nonbsp" !in opts,
+            mode = if ("literary" in opts) NormalizationMode.Extended else NormalizationMode.Conservative,
         )
         return Fixture(id, file, settings, input, expected)
     }

@@ -29,7 +29,7 @@ import java.util.Date
 
 /** Профиль: вход/выход, проверка сессии, журнал. */
 @Composable
-fun ProfileScreen() {
+fun ProfileScreen(nav: androidx.navigation.NavController) {
     val app = LocalContext.current.shiori
     val auth = app.auth
     val state by auth.state.collectAsStateWithLifecycle()
@@ -100,6 +100,16 @@ fun ProfileScreen() {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+        val sync by app.store.syncAccount.collectAsStateWithLifecycle()
+        if (state is SessionState.Authorized) {
+            SwitchRow("Сохранять прогресс в закладку аккаунта RanobeLib", sync) { app.store.setSyncAccount(it) }
+            Text(
+                "При выходе из главы Shiori запишет главу и абзац в вашу закладку на сайте. По умолчанию выключено.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(onClick = { nav.navigate("downloads") }) { Text("Загрузки") }
         OutlinedButton(onClick = { logOpen = true }) { Text("Журнал") }
         Text(
             "Shiori ${BuildConfig.VERSION_NAME} — неофициальный клиент RanobeLib. Не связан с RanobeLib/LibSocial.",

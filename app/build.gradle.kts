@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.velcheor137.shiori"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.0-dev"
+        versionCode = 4
+        versionName = "0.2.0-dev"
     }
 
     buildTypes {
@@ -42,6 +42,9 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.compose.icons.core)
+    implementation(libs.androidx.work.runtime)
+    implementation(project(":engine:ranges"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

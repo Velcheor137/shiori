@@ -1,5 +1,6 @@
 package io.github.velcheor137.shiori
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -105,6 +110,46 @@ fun LibraryScreen(nav: NavController) {
     LaunchedEffect(session) { vm.start() }
     val s by vm.state.collectAsStateWithLifecycle()
 
+    var local by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    Column(Modifier.fillMaxSize()) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            listOf("Списки аккаунта", "Закладки в тексте").forEachIndexed { i, label ->
+                SegmentedButton(
+                    selected = local == (i == 1),
+                    onClick = { local = i == 1 },
+                    shape = SegmentedButtonDefaults.itemShape(i, 2),
+                ) { Text(label) }
+            }
+        }
+        if (local) LocalBookmarks(nav) else AccountLists(nav, session, vm, s)
+    }
+}
+
+@Composable
+private fun LocalBookmarks(nav: NavController) {
+    val app = LocalContext.current.shiori
+    val all by app.store.bookmarks.collectAsStateWithLifecycle()
+    if (all.isEmpty()) {
+        ErrorBox("Закладок пока нет. В читалке нажмите значок закладки на нижней панели.", null)
+        return
+    }
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(all, key = { it.id }) { b ->
+            Column(
+                Modifier.fillMaxWidth().clickable { nav.navigate(Routes.reader(b.slug, b.branchId, b.volume, b.number, startBlock = b.block)) }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ) {
+                Text(b.titleName, fontFamily = TitleFont, maxLines = 1)
+                Text("Том ${b.volume} Глава ${b.number}", style = androidx.compose.material3.MaterialTheme.typography.bodySmall)
+                if (b.excerpt.isNotBlank()) Text(b.excerpt, style = androidx.compose.material3.MaterialTheme.typography.bodySmall, maxLines = 2)
+            }
+            androidx.compose.material3.HorizontalDivider()
+        }
+    }
+}
+
+@Composable
+private fun AccountLists(nav: NavController, session: SessionState, vm: LibraryViewModel, s: LibraryViewModel.State) {
     if (session !is SessionState.Authorized) {
         ErrorBox("Ваши списки RanobeLib появятся после входа в аккаунт (вкладка «Профиль»).", null)
         return

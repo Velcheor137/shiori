@@ -21,6 +21,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
@@ -71,6 +74,7 @@ class TitleViewModel(private val app: ShioriApp, private val slug: String) : Vie
                 val title = titleJob.await().also { app.titleCache[slug] = it.card }
                 val branches = branchesOf(title, chapters)
                 val branchId = resolveBranch(title, branches)
+                app.branchLabels[slug] = branches.associate { it.branchId to it.label }
                 AppLog.i("TITLE", "Тайтл ${title.card.id} «${title.card.name}»: глав ${chapters.size}, переводов ${branches.size}, выбран перевод $branchId")
                 Data(title, chapters, branches, branchId)
             }.onSuccess { state.value = Load.Ready(it) }
@@ -126,7 +130,11 @@ fun TitleScreen(nav: NavController, slug: String) {
             val branchChapters = remember(d.chapters, d.branchId) { d.chapters.filter { it.version(d.branchId) != null } }
             var tab by rememberSaveable { mutableStateOf(0) }
             var descending by rememberSaveable { mutableStateOf(false) }
-            val shown = if (descending) branchChapters.reversed() else branchChapters
+            var query by rememberSaveable { mutableStateOf("") }
+            val context = LocalContext.current
+            val downloaded = remember(d.title.card.id, allProgress) { DownloadFiles.downloadedIds(context, d.title.card.id) }
+            val ordered = if (descending) branchChapters.reversed() else branchChapters
+            val shown = remember(ordered, query) { filterChapters(ordered, query) }
             val list = rememberLazyListState()
             val scope = rememberCoroutineScope()
             val currentIndex = progress?.let { p -> shown.indexOfFirst { it.volume == p.volume && it.number == p.number } } ?: -1
@@ -147,7 +155,13 @@ fun TitleScreen(nav: NavController, slug: String) {
                         } else if (branchChapters.isNotEmpty()) {
                             Button(onClick = { open(branchChapters.first()) }, modifier = Modifier.fillMaxWidth()) { Text("Начать читать") }
                         }
-                        if (d.branches.isNotEmpty()) BranchPicker(d.branches, d.branchId, vm::pin)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) { if (d.branches.isNotEmpty()) BranchPicker(d.branches, d.branchId, vm::pin) }
+                            TextButton(onClick = { app.store.pinBranch(d.title.card.id, d.branchId); nav.navigate(Routes.download(slug)) }) {
+                                Icon(AppIcons.Download, null, Modifier.size(18.dp))
+                                Text(" Скачать")
+                            }
+                        }
                     }
                 }
                 item {
@@ -163,10 +177,19 @@ fun TitleScreen(nav: NavController, slug: String) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                             TextButton(onClick = { descending = !descending }) { Text(if (descending) "Сначала новые ↓" else "Сначала старые ↑") }
                             if (currentIndex >= 0) {
-                                val offset = 4 + if (branchChapters.size < d.chapters.size) 1 else 0
+                                val offset = 5 + if (branchChapters.size < d.chapters.size) 1 else 0
                                 TextButton(onClick = { scope.launch { list.animateScrollToItem(currentIndex + offset) } }) { Text("К текущей главе") }
                             }
                         }
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            placeholder = { Text("Поиск главы: номер или название") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
                     }
                     if (branchChapters.size < d.chapters.size) {
                         item {
@@ -181,7 +204,7 @@ fun TitleScreen(nav: NavController, slug: String) {
                     items(shown, key = { it.apiId }) { c ->
                         val v = c.version(d.branchId)!!
                         val isCurrent = progress != null && progress.volume == c.volume && progress.number == c.number
-                        ChapterRow(c, v.createdAt, isCurrent, locked = !v.isOpen) { open(c, restore = isCurrent) }
+                        ChapterRow(c, v.createdAt, isCurrent, locked = !v.isOpen, downloaded = v.versionId in downloaded) { open(c, restore = isCurrent) }
                     }
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -251,7 +274,7 @@ private fun About(t: TitleDetails) {
 }
 
 @Composable
-private fun ChapterRow(c: ChapterEntry, createdAt: String?, current: Boolean, locked: Boolean, onClick: () -> Unit) {
+private fun ChapterRow(c: ChapterEntry, createdAt: String?, current: Boolean, locked: Boolean, downloaded: Boolean, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -263,6 +286,7 @@ private fun ChapterRow(c: ChapterEntry, createdAt: String?, current: Boolean, lo
                     fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal,
                 )
             }
+            if (downloaded) Icon(AppIcons.Download, "Скачано", Modifier.size(16.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             if (locked) Text("платная ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             createdAt?.take(10)?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }

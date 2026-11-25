@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shiori (栞, «закладка»): раскрытая книга и красная лента-закладка. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- тень под книгой -->
+    <path android:fillColor="#22000000" android:pathData="M30,74 Q54,80 78,74 L78,76 Q54,83 30,76 Z" />
+    <!-- левая страница -->
+    <path android:fillColor="#FFFFFCF6" android:strokeColor="#FF2B2622" android:strokeWidth="2.2" android:strokeLineJoin="round"
+        android:pathData="M54,42 C47,37 38,36 30,38 L30,72 C38,70 47,71 54,76 Z" />
+    <!-- правая страница -->
+    <path android:fillColor="#FFFFFCF6" android:strokeColor="#FF2B2622" android:strokeWidth="2.2" android:strokeLineJoin="round"
+        android:pathData="M54,42 C61,37 70,36 78,38 L78,72 C70,70 61,71 54,76 Z" />
+    <!-- строки текста -->
+    <path android:strokeColor="#FF8E857A" android:strokeWidth="1.6" android:strokeLineCap="round"
+        android:pathData="M35,46 C40,45 45,45.5 49,47 M35,52 C40,51 45,51.5 49,53 M35,58 C40,57 45,57.5 49,59 M35,64 C40,63 45,63.5 49,65" />
+    <path android:strokeColor="#FF8E857A" android:strokeWidth="1.6" android:strokeLineCap="round"
+        android:pathData="M59,47 C63,45.5 68,45 73,46 M59,53 C63,51.5 68,51 71,51.6" />
+    <!-- лента-закладка -->
+    <path android:fillColor="#FF9E3B2C" android:pathData="M63,30 L71,30 L71,62 L67,58 L63,62 Z" />
+    <path android:fillColor="#FF7E2C20" android:pathData="M63,30 L71,30 L71,33 L63,33 Z" />
+</vector>

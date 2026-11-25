@@ -99,9 +99,19 @@ class LibSocialApi(private val http: LibSocialHttp) {
         (getAny("/api/branches/$titleId?team_defaults=1").let { it as? JsonObject }?.arr("data")?.firstOrNull() as? JsonObject)?.long("id")
     }.getOrNull()
 
-    suspend fun chapter(slug: String, volume: String, number: String, branchId: Long): ChapterContent {
+    suspend fun chapter(slug: String, volume: String, number: String, branchId: Long): ChapterContent =
+        parseChapter(chapterRaw(slug, volume, number, branchId), volume, number, branchId)
+
+    /** Сырой JSON главы — его же сохраняем при скачивании (исходник не меняется, R-IMMUTABLE). */
+    suspend fun chapterRaw(slug: String, volume: String, number: String, branchId: Long): String {
         val branchPart = if (branchId != 0L) "&branch_id=$branchId" else ""
-        val o = getObject("/api/manga/$slug/chapter?volume=${enc(volume)}&number=${enc(number)}$branchPart").obj("data")
+        val r = http.get("/api/manga/$slug/chapter?volume=${enc(volume)}&number=${enc(number)}$branchPart")
+        if (!r.isSuccess) throw ApiException(r.code, describe(r))
+        return r.body
+    }
+
+    fun parseChapter(raw: String, volume: String, number: String, branchId: Long, slug: String = ""): ChapterContent {
+        val o = (runCatching { json.parseToJsonElement(raw) }.getOrNull() as? JsonObject)?.obj("data")
             ?: throw ApiException(null, "Пустой ответ главы")
         val restricted = o.obj("restricted_view")?.bool("is_open") == false
         val attachments = o.arr("attachments").mapNotNull { a ->
@@ -119,6 +129,60 @@ class LibSocialApi(private val http: LibSocialHttp) {
             blocks = blocks,
             restricted = restricted,
             price = o.obj("restricted_view")?.int("price"),
+        )
+    }
+
+    /**
+     * Комментарии к версии главы (`post_type=chapter`, `post_id` = id главы конкретного перевода, F-16).
+     * Ответ: `{data:{root:[...], replies:[...]}, meta:{has_next_page}}`; форма комментария разбирается защитно.
+     */
+    suspend fun comments(postId: Long, postType: String, page: Int, sortBy: String = "id"): CommentsPage {
+        val root = getObject("/api/comments?post_id=$postId&post_type=$postType&sort_by=$sortBy&sort_type=desc&page=$page")
+        val data = root.obj("data")
+        val roots = data?.arr("root").orEmpty().mapNotNull { (it as? JsonObject)?.toComment(postId) }
+        val replies = data?.arr("replies").orEmpty().mapNotNull { (it as? JsonObject)?.toComment(postId) }
+        if (page == 1) {
+            (data?.arr("root")?.firstOrNull() as? JsonObject)?.let { AppLog.i(TAG, "Ключи комментария: ${it.keys}; user: ${(it["user"] as? JsonObject)?.keys}") }
+        }
+        return CommentsPage(roots, replies, root.obj("meta")?.bool("has_next_page") == true)
+    }
+
+    /** Закладка аккаунта на тайтл (`GET /api/manga/{slug}/bookmark`). null — закладки нет или не вошли. */
+    suspend fun titleBookmark(slug: String): AccountBookmark? = runCatching {
+        val o = getObject("/api/manga/$slug/bookmark").obj("data") ?: return@runCatching null
+        AppLog.i(TAG, "Закладка аккаунта: ключи ${o.keys}")
+        AccountBookmark(o.long("id"), o.long("status") ?: 1, o.long("item_id") ?: o.obj("item")?.long("id"), o.int("progress"))
+    }.getOrNull()
+
+    /** Сохранить прогресс в закладке аккаунта (`POST /api/bookmarks`, как сайт): глава + номер абзаца. */
+    suspend fun saveAccountProgress(slug: String, status: Long, chapterId: Long, paragraph: Int, itemNumber: Int): Boolean {
+        val body = buildString {
+            append("{\"media_type\":\"manga\",\"media_slug\":\"").append(slug).append("\",")
+            append("\"bookmark\":{\"item_id\":").append(chapterId).append(",\"progress\":").append(paragraph).append(",\"status\":").append(status).append("},")
+            append("\"meta\":{\"item_number\":").append(itemNumber).append("}}")
+        }
+        val r = http.postJson("/api/bookmarks", body)
+        AppLog.i(TAG, "Прогресс в аккаунт: HTTP ${r.code}")
+        return r.isSuccess
+    }
+
+    private fun JsonObject.toComment(postId: Long): Comment? {
+        val id = long("id") ?: return null
+        val user = obj("user")
+        val avatar = user?.obj("avatar")?.let { it.str("url") ?: it.str("default") ?: it.str("thumbnail") } ?: user?.str("avatar")
+        val votes = obj("votes")
+        return Comment(
+            id = id,
+            postId = postId,
+            parentId = long("parent_comment"),
+            rootId = long("root_id"),
+            author = user?.str("username") ?: "—",
+            avatar = avatar,
+            createdAt = str("created_at"),
+            text = richText(this["comment"]).ifBlank { str("comment").orEmpty() },
+            votesUp = votes?.int("up") ?: votes?.int("likes") ?: int("votes_up"),
+            votesDown = votes?.int("down") ?: votes?.int("dislikes"),
+            repliesCount = int("replies_count") ?: 0,
         )
     }
 

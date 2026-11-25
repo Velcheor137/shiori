@@ -44,12 +44,3 @@ private val Dark = darkColorScheme(
 fun ShioriTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
 }
-
-data class ReaderColors(val background: Color, val text: Color, val secondary: Color)
-
-fun ReaderTheme.colors(): ReaderColors = when (this) {
-    ReaderTheme.Light -> ReaderColors(Color(0xFFFAF8F3), Color(0xFF1F1D1A), Color(0xFF6F6A61))
-    ReaderTheme.Sepia -> ReaderColors(Color(0xFFF3E9D6), Color(0xFF3B2F22), Color(0xFF6B5A45))
-    ReaderTheme.Dark -> ReaderColors(Color(0xFF151412), Color(0xFFE8E5DE), Color(0xFF968F84))
-    ReaderTheme.Amoled -> ReaderColors(Color(0xFF000000), Color(0xFFD9D5CC), Color(0xFF8C867B))
-}

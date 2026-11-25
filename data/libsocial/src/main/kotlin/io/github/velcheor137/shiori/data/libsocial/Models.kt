@@ -67,6 +67,24 @@ data class ChapterContent(
     val price: Int?,
 )
 
+data class Comment(
+    val id: Long,
+    val postId: Long,
+    val parentId: Long?,
+    val rootId: Long?,
+    val author: String,
+    val avatar: String?,
+    val createdAt: String?,
+    val text: String,
+    val votesUp: Int?,
+    val votesDown: Int?,
+    val repliesCount: Int,
+)
+
+data class CommentsPage(val roots: List<Comment>, val replies: List<Comment>, val hasNext: Boolean)
+
+data class AccountBookmark(val id: Long?, val status: Long, val chapterId: Long?, val progress: Int?)
+
 data class BookmarkFolder(val id: Long, val name: String, val count: Int)
 
 data class Page<T>(val items: List<T>, val hasNext: Boolean)

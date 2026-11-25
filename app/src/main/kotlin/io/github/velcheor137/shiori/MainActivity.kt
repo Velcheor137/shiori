@@ -23,6 +23,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,19 +38,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class Tab(val route: String, val label: String, val glyph: String)
+private data class Tab(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
 
 private val tabs = listOf(
-    Tab("home", "Главная", "⌂"),
-    Tab("catalog", "Каталог", "☰"),
-    Tab("library", "Библиотека", "❐"),
-    Tab("profile", "Профиль", "◉"),
+    Tab("home", "Главная", androidx.compose.material.icons.Icons.Filled.Home),
+    Tab("catalog", "Каталог", AppIcons.Catalog),
+    Tab("library", "Библиотека", AppIcons.Library),
+    Tab("profile", "Профиль", androidx.compose.material.icons.Icons.Filled.Person),
 )
 
 object Routes {
     fun title(slug: String) = "title/${Uri.encode(slug)}"
-    fun reader(slug: String, branchId: Long, volume: String, number: String, restore: Boolean = false) =
-        "reader/${Uri.encode(slug)}/$branchId/${Uri.encode(volume)}/${Uri.encode(number)}?restore=$restore"
+    fun reader(slug: String, branchId: Long, volume: String, number: String, restore: Boolean = false, startBlock: Int = -1) =
+        "reader/${Uri.encode(slug)}/$branchId/${Uri.encode(volume)}/${Uri.encode(number)}?restore=$restore&block=$startBlock"
+    fun download(slug: String) = "download/${Uri.encode(slug)}"
 }
 
 @Composable
@@ -63,18 +66,19 @@ private fun ShioriNav() {
                 composable("home") { HomeScreen(nav) }
                 composable("catalog") { CatalogScreen(nav) }
                 composable("library") { LibraryScreen(nav) }
-                composable("profile") { ProfileScreen() }
+                composable("profile") { ProfileScreen(nav) }
                 composable("title/{slug}", arguments = listOf(navArgument("slug") { type = NavType.StringType })) { e ->
                     TitleScreen(nav, e.arguments?.getString("slug").orEmpty())
                 }
                 composable(
-                    "reader/{slug}/{branch}/{volume}/{number}?restore={restore}",
+                    "reader/{slug}/{branch}/{volume}/{number}?restore={restore}&block={block}",
                     arguments = listOf(
                         navArgument("slug") { type = NavType.StringType },
                         navArgument("branch") { type = NavType.LongType },
                         navArgument("volume") { type = NavType.StringType },
                         navArgument("number") { type = NavType.StringType },
                         navArgument("restore") { type = NavType.BoolType; defaultValue = false },
+                        navArgument("block") { type = NavType.IntType; defaultValue = -1 },
                     ),
                 ) { e ->
                     val a = e.arguments!!
@@ -85,8 +89,13 @@ private fun ShioriNav() {
                         volume = a.getString("volume").orEmpty(),
                         number = a.getString("number").orEmpty(),
                         restore = a.getBoolean("restore"),
+                        startBlock = a.getInt("block"),
                     )
                 }
+                composable("download/{slug}", arguments = listOf(navArgument("slug") { type = NavType.StringType })) { e ->
+                    DownloadScreen(nav, e.arguments?.getString("slug").orEmpty())
+                }
+                composable("downloads") { DownloadsOverviewScreen(nav) }
             }
         }
         if (showBar) BottomBar(nav, route)
@@ -108,7 +117,7 @@ private fun BottomBar(nav: NavHostController, current: String?) {
                         }
                     }
                 },
-                icon = { Text(t.glyph) },
+                icon = { androidx.compose.material3.Icon(t.icon, null) },
                 label = { Text(t.label) },
             )
         }

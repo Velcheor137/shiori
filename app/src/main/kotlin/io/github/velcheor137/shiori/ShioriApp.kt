@@ -31,6 +31,10 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
     /** Список глав тайтла в памяти, чтобы читалка не запрашивала его заново после карточки. */
     val chapterCache = ConcurrentHashMap<String, List<ChapterEntry>>()
     val titleCache = ConcurrentHashMap<String, TitleCard>()
+    /** Подписи переводов тайтла (команды) по branchId — для меток в комментариях и читалке. */
+    val branchLabels = ConcurrentHashMap<String, Map<Long, String>>()
+    val accountBookmarks = ConcurrentHashMap<String, Long>()
+    val appScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     private lateinit var userAgent: String
 

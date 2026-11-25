@@ -1,0 +1,44 @@
+# Режим «Литературный» (NormalizationMode.Extended). Тексты искусственные. «⍽» — неразрывный пробел, «⏎» — перевод строки.
+
+### LIT-001 | rules=dialogues,thoughts | opts=literary
+<<< «Уходи» — прошептала она.
+>>> —⍽Уходи,⍽— прошептала она.
+### LIT-002 | rules=dialogues,thoughts | opts=literary
+<<< «Хватит» - буркнул он и отвернулся.
+>>> —⍽Хватит,⍽— буркнул он и отвернулся.
+### LIT-003 | rules=dialogues,thoughts | opts=literary
+<<< «А?» «Б!»
+>>> —⍽А?⏎—⍽Б!
+### LIT-004 | rules=dialogues,thoughts | opts=literary
+<<< «Кто здесь?» «Я». «Зачем?»
+>>> «Кто здесь?» «Я». «Зачем?»
+### LIT-005 | rules=dialogues,thoughts | opts=literary
+<<< «Кто здесь?» «Я.» «Зачем?»
+>>> —⍽Кто здесь?⏎—⍽Я.⏎—⍽Зачем?
+### LIT-006 | rules=dialogues,thoughts | opts=literary
+<<< «Куда?» 'Только бы не спросил', — подумал он.
+>>> —⍽Куда?⏎«Только бы не спросил», — подумал он.
+### LIT-007 | rules=dialogues,thoughts | opts=literary
+<<< «Это было давно. Я тогда жил у моря и каждый день
+>>> —⍽Это было давно. Я тогда жил у моря и каждый день
+### LIT-008 | rules=dialogues,thoughts | opts=literary
+<<< "Куда ты?" — спросил он.
+>>> —⍽Куда ты?⍽— спросил он.
+### LIT-009 | rules=dialogues,thoughts | opts=literary
+<<< «Я не знаю», - ответил он.
+>>> —⍽Я не знаю,⍽— ответил он.
+### NEG-LIT-001 | rules=dialogues,thoughts | opts=literary
+<<< «Война и мир» — роман о войне.
+>>> «Война и мир» — роман о войне.
+### NEG-LIT-002 | rules=dialogues,thoughts | opts=literary
+<<< «Северный ветер» — Корабль капитана.
+>>> «Северный ветер» — Корабль капитана.
+### NEG-LIT-003 | rules=dialogues,thoughts | opts=literary
+<<< Он прочитал книгу «Война и мир».
+>>> Он прочитал книгу «Война и мир».
+### NEG-LIT-004 | rules=dialogues,thoughts | opts=literary
+<<< Ссылка: https://example.com/a'b'c — не работает.
+>>> Ссылка: https://example.com/a'b'c — не работает.
+### NEG-LIT-005 | rules=dialogues,thoughts | opts=literary
+<<< Газета «Правда» и журнал «Огонёк» лежали на столе.
+>>> Газета «Правда» и журнал «Огонёк» лежали на столе.

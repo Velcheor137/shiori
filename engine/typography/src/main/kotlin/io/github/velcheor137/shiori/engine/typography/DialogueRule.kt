@@ -26,18 +26,20 @@ internal object DialogueRule {
     private val innerDash = Regex("(?<=[,.?!…])$SP*$DASH$SP+")
 
     fun edits(text: String, analysis: QuoteAnalysis, settings: NormalizationSettings): List<Edit> {
-        if (!analysis.doubleBalanced) return emptyList()
+        val literary = settings.mode == NormalizationMode.Extended
+        val leadDash = if (settings.nbspAroundDialogueDash) "—${Chars.NBSP}" else "— "
+        if (!analysis.doubleBalanced) return if (literary) multiParagraphStart(text, leadDash) else emptyList()
         val tops = analysis.topLevelDouble()
         val q = tops.firstOrNull() ?: return emptyList()
         if (!isSpeechFamily(q.family, settings)) return emptyList()
         if (!Chars.isBlank(text.substring(0, q.open))) return emptyList()
+        if (literary) replicaChain(text, tops, leadDash)?.let { return it }
 
         val innerEndIdx = lastNonSpace(text, q.open + 1, q.close) ?: return emptyList()
         val innerEnd = text[innerEndIdx]
         val inner = text.substring(q.open + 1, q.close)
         val afterTrim = trimSpaces(text.substring(q.close + 1))
 
-        val leadDash = if (settings.nbspAroundDialogueDash) "—${Chars.NBSP}" else "— "
         val midDash = if (settings.nbspAroundDialogueDash) "${Chars.NBSP}— " else " — "
         val edits = mutableListOf(Edit(q.open, q.open + 1, leadDash, P, "D"))
 
@@ -59,12 +61,24 @@ internal object DialogueRule {
             return edits
         }
 
+        // L3 (литературный): реплика, сразу за которой идёт мысль в одинарных кавычках, — с новой строки.
+        if (literary && tops.size == 1 && isTerminal(innerEnd)) {
+            val rest = text.substring(q.close + 1)
+            val lead = rest.length - rest.trimStart { Chars.isSpace(it) }.length
+            val next = rest.getOrNull(lead)
+            if (lead > 0 && (next == '\'' || next == '‘')) {
+                edits += Edit(q.close, q.close + 1 + lead, "\n", P, "L3")
+                return edits
+            }
+        }
+
         // D2: реплика + слова автора.
         val after = text.substring(q.close + 1)
         val sep = authorSeparator.find(after) ?: return emptyList()
         val hasComma = sep.groups[1] != null
         val endsWithStop = innerEnd in ",.?!…"
-        if (!endsWithStop && !hasComma) return emptyList()
+        // L1 (литературный): «Уходи» — прошептала она. Без запятой, но слова автора начинаются с глагола речи.
+        if (!endsWithStop && !hasComma && !(literary && startsWithSpeechVerb(after.substring(sep.range.last + 1)))) return emptyList()
         if (innerEnd == '.' && !isPartOfDotEllipsis(text, innerEndIdx)) {
             edits += Edit(innerEndIdx, innerEndIdx + 1, ",", P, "D2")
         }
@@ -93,7 +107,51 @@ internal object DialogueRule {
 
     private fun isSpeechFamily(family: QuoteFamily, settings: NormalizationSettings): Boolean = when (family) {
         QuoteFamily.Guillemet, QuoteFamily.Low -> true
-        QuoteFamily.Straight, QuoteFamily.Curly -> settings.straightQuotesAsSpeech
+        QuoteFamily.Straight, QuoteFamily.Curly -> settings.straightQuotesAsSpeech || settings.mode == NormalizationMode.Extended
         QuoteFamily.Single -> false
+    }
+
+    /** L2: «А?» «Б!» — несколько реплик подряд без слов автора: каждая с новой строки через тире. */
+    private fun replicaChain(text: String, tops: List<QuoteSpan>, leadDash: String): List<Edit>? {
+        if (tops.size < 2 || tops.any { it.family != QuoteFamily.Guillemet }) return null
+        for (i in tops.indices) {
+            val end = lastNonSpace(text, tops[i].open + 1, tops[i].close) ?: return null
+            if (!isTerminal(text[end])) return null
+            val gapEnd = if (i + 1 < tops.size) tops[i + 1].open else text.length
+            val gap = text.substring(tops[i].close + 1, gapEnd)
+            if (!Chars.isBlank(gap)) return null
+        }
+        val edits = mutableListOf(Edit(tops[0].open, tops[0].open + 1, leadDash, P, "L2"))
+        for (i in tops.indices) {
+            if (i + 1 < tops.size) edits += Edit(tops[i].close, tops[i + 1].open + 1, "\n$leadDash", P, "L2")
+            else edits += Edit(tops[i].close, tops[i].close + 1, "", P, "L2")
+        }
+        return edits
+    }
+
+    /** L4: абзац открывает многоабзацную реплику («… без закрывающей) — ставим тире. */
+    private fun multiParagraphStart(text: String, leadDash: String): List<Edit> {
+        val start = text.indexOfFirst { !Chars.isSpace(it) }
+        if (start < 0 || text[start] != '«') return emptyList()
+        if (text.count { it == '«' } != 1 || text.any { it == '»' || it == '"' || it == '“' || it == '”' || it == '„' }) return emptyList()
+        if (text.getOrNull(start + 1)?.isLetter() != true) return emptyList()
+        return listOf(Edit(start, start + 1, leadDash, P, "L4"))
+    }
+
+    private val speechVerbStems = listOf(
+        "сказа", "ответи", "отвеча", "спроси", "спрашива", "крикну", "крича", "закрича", "прошепта", "шепта", "шепну",
+        "пробормота", "бормота", "произне", "буркну", "заяви", "воскликну", "проговори", "повтори", "добави", "возрази",
+        "подума", "дума", "отозва", "рявкну", "прорыча", "пискну", "выдохну", "хмыкну", "фыркну", "протяну", "перебил",
+        "перебива", "поинтересова", "уточни", "предложи", "согласи", "отреза", "процеди", "простона", "всхлипну", "прошипе",
+        "продолжи", "закончи", "позва", "окликну", "взмоли", "поясни", "объясни", "призна", "напомни", "предупреди",
+        "приказа", "скомандова", "потребова", "вмеша", "сообщи", "огрызну", "броси", "выпали", "выкрикну", "промолви",
+        "пропе", "ахну", "охну", "замети", "отмети", "усмехну", "хохотну", "засмея", "рассмея", "улыбну", "вздохну",
+        "протараторил", "залепета", "пролепета", "простонал", "зашепта", "заорал", "завопил", "взвизгну", "прохрипе",
+        "откликну", "поддакну", "передразни", "вставил", "отрапортова", "доложи", "подтверди", "мелькнул", "пронеслось",
+    )
+
+    private fun startsWithSpeechVerb(author: String): Boolean {
+        val word = author.trimStart().takeWhile { it.isLetter() }
+        return word.isNotEmpty() && word[0].isLowerCase() && speechVerbStems.any { word.startsWith(it) }
     }
 }

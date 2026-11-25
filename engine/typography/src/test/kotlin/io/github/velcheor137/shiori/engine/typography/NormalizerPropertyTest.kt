@@ -15,6 +15,7 @@ class NormalizerPropertyTest {
         NormalizationSettings(dialogues = true),
         NormalizationSettings(thoughts = true),
         NormalizationSettings(dialogues = true, thoughts = true, straightQuotesAsSpeech = true, nbspAroundDialogueDash = false),
+        NormalizationSettings(dialogues = true, thoughts = true, mode = NormalizationMode.Extended),
     )
 
     private fun randomParagraph(rnd: Random): String {
