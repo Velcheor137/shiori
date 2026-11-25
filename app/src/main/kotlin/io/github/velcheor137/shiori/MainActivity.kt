@@ -1,128 +1,117 @@
 package io.github.velcheor137.shiori
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.velcheor137.shiori.core.common.AppLog
-import io.github.velcheor137.shiori.data.auth.AuthRepository
-import io.github.velcheor137.shiori.data.auth.MeCheck
-import io.github.velcheor137.shiori.data.auth.SessionState
-import kotlinx.coroutines.launch
-import java.text.DateFormat
-import java.util.Date
+import androidx.navigation.NavHostController
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val auth = (application as ShioriApp).auth
         setContent {
-            MaterialTheme {
-                Surface(Modifier.fillMaxSize().safeDrawingPadding()) { AccountScreen(auth) }
+            ShioriTheme {
+                Surface(Modifier.fillMaxSize()) { ShioriNav() }
             }
         }
+    }
+}
+
+private data class Tab(val route: String, val label: String, val glyph: String)
+
+private val tabs = listOf(
+    Tab("home", "Главная", "⌂"),
+    Tab("catalog", "Каталог", "☰"),
+    Tab("library", "Библиотека", "❐"),
+    Tab("profile", "Профиль", "◉"),
+)
+
+object Routes {
+    fun title(slug: String) = "title/${Uri.encode(slug)}"
+    fun reader(slug: String, branchId: Long, volume: String, number: String, restore: Boolean = false) =
+        "reader/${Uri.encode(slug)}/$branchId/${Uri.encode(volume)}/${Uri.encode(number)}?restore=$restore"
+}
+
+@Composable
+private fun ShioriNav() {
+    val nav = rememberNavController()
+    val entry by nav.currentBackStackEntryAsState()
+    val route = entry?.destination?.route
+    val showBar = route in tabs.map { it.route }
+    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+        Box(Modifier.weight(1f)) {
+            NavHost(nav, startDestination = "home") {
+                composable("home") { HomeScreen(nav) }
+                composable("catalog") { CatalogScreen(nav) }
+                composable("library") { LibraryScreen(nav) }
+                composable("profile") { ProfileScreen() }
+                composable("title/{slug}", arguments = listOf(navArgument("slug") { type = NavType.StringType })) { e ->
+                    TitleScreen(nav, e.arguments?.getString("slug").orEmpty())
+                }
+                composable(
+                    "reader/{slug}/{branch}/{volume}/{number}?restore={restore}",
+                    arguments = listOf(
+                        navArgument("slug") { type = NavType.StringType },
+                        navArgument("branch") { type = NavType.LongType },
+                        navArgument("volume") { type = NavType.StringType },
+                        navArgument("number") { type = NavType.StringType },
+                        navArgument("restore") { type = NavType.BoolType; defaultValue = false },
+                    ),
+                ) { e ->
+                    val a = e.arguments!!
+                    ReaderScreen(
+                        nav = nav,
+                        slug = a.getString("slug").orEmpty(),
+                        branchId = a.getLong("branch"),
+                        volume = a.getString("volume").orEmpty(),
+                        number = a.getString("number").orEmpty(),
+                        restore = a.getBoolean("restore"),
+                    )
+                }
+            }
+        }
+        if (showBar) BottomBar(nav, route)
     }
 }
 
 @Composable
-private fun AccountScreen(auth: AuthRepository) {
-    val state by auth.state.collectAsStateWithLifecycle()
-    var loginOpen by remember { mutableStateOf(false) }
-    var logOpen by remember { mutableStateOf(false) }
-    var check by remember { mutableStateOf<MeCheck?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    val hosts = remember { mutableStateListOf<String>() }
-    val scope = rememberCoroutineScope()
-
-    fun runCheck() {
-        busy = true
-        scope.launch {
-            check = auth.checkMe()
-            busy = false
-        }
-    }
-
-    if (logOpen) {
-        BackHandler { logOpen = false }
-        LogScreen(onBack = { logOpen = false })
-        return
-    }
-
-    if (loginOpen) {
-        BackHandler {
-            AppLog.i("UI", "Вход закрыт кнопкой «Назад»")
-            loginOpen = false
-        }
-        LoginScreen(
-            onSiteAuth = auth::acceptSiteAuth,
-            onHost = { if (it !in hosts) hosts += it },
-            onDone = {
-                loginOpen = false
-                runCheck()
-            },
-            onCancel = {
-                AppLog.i("UI", "Вход закрыт кнопкой «Закрыть»")
-                loginOpen = false
-            },
-        )
-        return
-    }
-
-    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Shiori — неофициальный клиент RanobeLib", style = MaterialTheme.typography.titleMedium)
-        when (val s = state) {
-            SessionState.Guest -> Text("Вы не вошли (гость).")
-            SessionState.ReloginRequired -> Text("Сессия истекла — войдите снова.")
-            is SessionState.Authorized -> {
-                Text("Аккаунт: ${s.username ?: "—"} (id ${s.userId ?: "—"})")
-                Text("Токен действует до: " + DateFormat.getDateTimeInstance().format(Date(s.expiresAtMillis)))
-            }
-        }
-        if (state is SessionState.Authorized) {
-            Button(onClick = { AppLog.i("UI", "Нажато «Проверить вход»"); runCheck() }, enabled = !busy) {
-                Text(if (busy) "Проверяю…" else "Проверить вход (/auth/me)")
-            }
-            OutlinedButton(onClick = { AppLog.i("UI", "Нажато «Выйти»"); scope.launch { auth.logout(); check = null } }) { Text("Выйти") }
-        } else {
-            Button(onClick = { AppLog.i("UI", "Нажато «Войти»"); hosts.clear(); loginOpen = true }) { Text("Войти в аккаунт") }
-        }
-        OutlinedButton(onClick = { logOpen = true }) { Text("Журнал") }
-        check?.let { c ->
-            Text(
-                buildString {
-                    append("Проверка: ")
-                    append(if (c.failure == null) "успешно" else "ошибка ${c.failure}")
-                    c.code?.let { append(", HTTP $it") }
-                    append(", домен ${c.host}")
-                    c.username?.let { append(", пользователь $it") }
+private fun BottomBar(nav: NavHostController, current: String?) {
+    NavigationBar {
+        tabs.forEach { t ->
+            NavigationBarItem(
+                selected = current == t.route,
+                onClick = {
+                    if (current != t.route) {
+                        nav.navigate(t.route) {
+                            popUpTo("home") { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
                 },
+                icon = { Text(t.glyph) },
+                label = { Text(t.label) },
             )
-        }
-        if (hosts.isNotEmpty()) {
-            Text("Хосты страницы входа:", style = MaterialTheme.typography.labelLarge)
-            Text(hosts.joinToString("\n"), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
+

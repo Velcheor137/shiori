@@ -70,6 +70,9 @@ fun LoginScreen(
                         settings.setSupportMultipleWindows(false)
                         visibility = View.INVISIBLE
                         AppLog.i(TAG, "Открываю вход. WebView UA: ${settings.userAgentString}")
+                        // Остатки прошлой попытки (одноразовый ключ входа в localStorage сайта) ломают новую.
+                        WebStorage.getInstance().deleteAllData()
+                        CookieManager.getInstance().removeAllCookies(null)
                         webChromeClient = object : WebChromeClient() {
                             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                                 AppLog.i(TAG, "console.${message.messageLevel()}: ${message.message().take(500)} (${message.sourceId().substringAfterLast('/')}:${message.lineNumber()})")
@@ -106,16 +109,23 @@ private class AuthClient(
 ) : WebViewClient() {
     private var done = false
     private var polling = false
+    private var restarts = 0
+    private var sawCallback = false
 
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
         request.url.host?.let(onHost)
-        // Только https внутри этого WebView; intent:, market:, http: и прочее молча блокируем.
-        val block = request.url.scheme != "https"
-        AppLog.i(
-            TAG,
-            "Переход ${if (block) "ЗАБЛОКИРОВАН" else "разрешён"}: ${request.url} " +
-                "(mainFrame=${request.isForMainFrame}, redirect=${request.isRedirect}, жест=${request.hasGesture()})",
-        )
+        val url = request.url
+        val info = "(mainFrame=${request.isForMainFrame}, redirect=${request.isRedirect}, жест=${request.hasGesture()})"
+        // auth.lib.social после входа через Яндекс перенаправляет на http:// — повышаем до https.
+        if (url.scheme == "http" && url.host?.let(::isLoginHost) == true) {
+            val https = url.buildUpon().scheme("https").build().toString()
+            AppLog.i(TAG, "Переход по http повышен до https: $https $info")
+            view.loadUrl(https)
+            return true
+        }
+        // Остальное не-https (intent:, market:, http: на чужих хостах) молча блокируем, наружу ничего не открываем.
+        val block = url.scheme != "https"
+        AppLog.i(TAG, "Переход ${if (block) "ЗАБЛОКИРОВАН" else "разрешён"}: $url $info")
         return block
     }
 
@@ -159,7 +169,17 @@ private class AuthClient(
         val onSite = host == SITE_HOST || host.endsWith(".$SITE_HOST")
         // ranobelib.me показываем только как «загрузку»: пользователь видит лишь форму входа.
         onShowPage(!onSite)
-        if (onSite) pollToken(view, attemptsLeft = POLL_ATTEMPTS)
+        if (!onSite) return
+        val path = Uri.parse(url).path.orEmpty()
+        // Если сайт ушёл не на форму входа и не на callback (например, на главную) — запускаем вход заново.
+        if (!path.startsWith("/ru/front/auth") && restarts < MAX_RESTARTS && !sawCallback) {
+            restarts++
+            AppLog.w(TAG, "Сайт открыл $url вместо формы входа — перезапускаю вход ($restarts/$MAX_RESTARTS)")
+            view.loadUrl(START_URL)
+            return
+        }
+        if (path.contains("oauth/callback")) sawCallback = true
+        pollToken(view, attemptsLeft = POLL_ATTEMPTS)
     }
 
     /** Сайт сохраняет токен асинхронно после обмена кода — проверяем localStorage несколько раз. */
@@ -198,6 +218,10 @@ private fun clearWebState(view: WebView) {
 
 /** Маршрут сайта «login»: сразу перенаправляет на форму `auth.lib.social/auth/login`. */
 private const val TAG = "LOGIN"
+private const val MAX_RESTARTS = 2
+
+private fun isLoginHost(host: String) =
+    host == SITE_HOST || host.endsWith(".$SITE_HOST") || host == "lib.social" || host.endsWith(".lib.social")
 private const val START_URL = "https://ranobelib.me/ru/front/auth"
 private const val SITE_HOST = "ranobelib.me"
 private const val POLL_ATTEMPTS = 60
