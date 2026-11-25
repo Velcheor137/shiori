@@ -179,6 +179,87 @@ class LibSocialApi(private val http: LibSocialHttp) {
         return (runCatching { json.parseToJsonElement(r.body) }.getOrNull() as? JsonObject)?.let { (it["data"] as? JsonObject ?: it).toComment(postId) }
     }
 
+    /**
+     * Уведомления (`GET /api/notifications`, как страница уведомлений сайта): `type` = `all` | `chapter` | `comments`,
+     * `read` = `unread` | `read` | `all`.
+     */
+    suspend fun notifications(type: String, read: String, page: Int): Page<Notification> {
+        val root = getObject("/api/notifications?notification_type=$type&read_type=$read&sort_type=desc&page=$page")
+        val items = root.arr("data").mapNotNull { (it as? JsonObject)?.toNotification() }
+        if (page == 1) (root.arr("data").firstOrNull() as? JsonObject)?.let { AppLog.i(TAG, "Ключи уведомления: ${it.keys}; data: ${(it["data"] as? JsonObject)?.keys}") }
+        return Page(items, root.obj("meta")?.bool("has_next_page") == true || root.obj("links")?.str("next") != null)
+    }
+
+    /** Число непрочитанных уведомлений (сумма по категориям `GET /api/notifications/count`). */
+    suspend fun unreadNotifications(): Int = runCatching {
+        val unread = getObject("/api/notifications/count").obj("data")?.obj("unread") ?: return@runCatching 0
+        unread["all"]?.let { (it as? JsonPrimitive)?.intOrNull } ?: unread.values.sumOf { (it as? JsonPrimitive)?.intOrNull ?: 0 }
+    }.getOrDefault(0)
+
+    suspend fun markNotificationRead(id: Long): Boolean = runCatching { http.putJson("/api/notifications/$id", "{}").isSuccess }.getOrDefault(false)
+
+    suspend fun markAllNotificationsRead(type: String): Boolean =
+        runCatching { http.putJson("/api/notifications/bulk", "{\"notification_type\":\"$type\"}").isSuccess }.getOrDefault(false)
+
+    /** Ветка обсуждения вокруг комментария (`GET /api/comments/{id}`): корень и ответы. */
+    suspend fun commentThread(commentId: Long, postId: Long, postType: String = "chapter"): CommentsPage {
+        val data = getObject("/api/comments/$commentId?post_id=$postId&post_type=$postType&sort_by=id&sort_type=desc").obj("data")
+        return CommentsPage(
+            data?.arr("root").orEmpty().mapNotNull { (it as? JsonObject)?.toComment(postId) },
+            data?.arr("replies").orEmpty().mapNotNull { (it as? JsonObject)?.toComment(postId) },
+            false,
+        )
+    }
+
+    private fun JsonObject.toNotification(): Notification? {
+        val id = long("id") ?: return null
+        val type = str("type").orEmpty()
+        val d = obj("data") ?: JsonObject(emptyMap())
+        val comment = d.obj("comment")
+        val relation = comment?.obj("relation")
+        val media = d.obj("media") ?: d.obj("manga") ?: relation?.obj("media") ?: relation?.obj("manga")
+        val chapter = d.obj("chapter") ?: relation
+        val mediaName = media?.let { it.str("rus_name")?.takeIf { n -> n.isNotBlank() } ?: it.str("name") }.orEmpty()
+        val slug = media?.str("slug_url") ?: media?.let { m -> m.long("id")?.let { i -> m.str("slug")?.let { "$i--$it" } } }
+        val cover = media?.obj("cover")?.let { it.str("thumbnail") ?: it.str("default") }
+            ?: media?.str("cover")?.let { c -> media.str("slug")?.let { "https://cover.imglib.info/uploads/cover/$it/cover/${c}_thumb.jpg" } }
+        val chapterLabel = chapter?.let { "Том ${it.str("volume") ?: "?"} Глава ${it.str("number") ?: "?"}" }
+        val kind = when {
+            type == "chapter" -> Notification.Kind.Chapter
+            type.startsWith("comment") && comment != null -> Notification.Kind.Comment
+            else -> Notification.Kind.Other
+        }
+        val text = when (kind) {
+            Notification.Kind.Chapter -> {
+                val count = d.int("count") ?: 1
+                "Новая глава: ${chapterLabel.orEmpty()}" + if (count > 1) " и ещё ${count - 1}" else ""
+            }
+            Notification.Kind.Comment -> {
+                val author = comment?.obj("user")?.str("username") ?: "Кто-то"
+                val body = richText(comment?.get("comment")).replace('\n', ' ').take(160)
+                "$author ответил(а)${chapterLabel?.let { " · $it" } ?: ""}: $body"
+            }
+            Notification.Kind.Other -> d.str("message") ?: d.str("text") ?: d.str("title") ?: type
+        }
+        return Notification(
+            id = id,
+            type = type,
+            isRead = bool("is_read") ?: (str("read_at") != null),
+            createdAt = str("created_at"),
+            kind = kind,
+            title = mediaName,
+            text = text,
+            cover = cover,
+            slug = slug,
+            volume = chapter?.str("volume"),
+            number = chapter?.str("number"),
+            branchId = chapter?.long("branch_id"),
+            commentId = comment?.long("id"),
+            commentRootId = comment?.long("root_id"),
+            chapterVersionId = if (comment?.str("relation_type") == "chapter") comment.long("relation_id") ?: relation?.long("id") else null,
+        )
+    }
+
     /** Закладка аккаунта на тайтл (`GET /api/manga/{slug}/bookmark`). null — закладки нет или не вошли. */
     suspend fun titleBookmark(slug: String): AccountBookmark? = runCatching {
         val o = getObject("/api/manga/$slug/bookmark").obj("data") ?: return@runCatching null

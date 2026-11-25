@@ -91,6 +91,28 @@ data class CommentsPage(val roots: List<Comment>, val replies: List<Comment>, va
 
 data class AccountBookmark(val id: Long?, val status: Long, val chapterId: Long?, val progress: Int?)
 
+/** Уведомление аккаунта. [kind] определяет действие при нажатии. */
+data class Notification(
+    val id: Long,
+    val type: String,
+    val isRead: Boolean,
+    val createdAt: String?,
+    val kind: Kind,
+    val title: String,
+    val text: String,
+    val cover: String?,
+    val slug: String?,
+    val volume: String?,
+    val number: String?,
+    val branchId: Long?,
+    /** Для ответа на комментарий: комментарий, версия главы (post_id) и корень ветки. */
+    val commentId: Long?,
+    val commentRootId: Long?,
+    val chapterVersionId: Long?,
+) {
+    enum class Kind { Chapter, Comment, Other }
+}
+
 data class BookmarkFolder(val id: Long, val name: String, val count: Int)
 
 data class Page<T>(val items: List<T>, val hasNext: Boolean)

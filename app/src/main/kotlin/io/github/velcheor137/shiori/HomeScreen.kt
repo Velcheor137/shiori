@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import androidx.compose.material.icons.filled.Notifications
 import io.github.velcheor137.shiori.core.common.AppLog
 import io.github.velcheor137.shiori.data.libsocial.LibSocialApi
 import io.github.velcheor137.shiori.data.libsocial.TitleCard
@@ -34,6 +35,12 @@ import kotlinx.coroutines.launch
 
 class HomeViewModel(private val api: LibSocialApi) : ViewModel() {
     val updates = MutableStateFlow<Load<List<TitleCard>>>(Load.Loading)
+    val unread = MutableStateFlow(0)
+
+    fun refreshUnread(authorized: Boolean) {
+        if (!authorized) { unread.value = 0; return }
+        viewModelScope.launch { unread.value = api.unreadNotifications() }
+    }
 
     init {
         load()
@@ -54,16 +61,20 @@ fun HomeScreen(nav: NavController) {
     val vm: HomeViewModel = viewModel { HomeViewModel(app.api) }
     val progress by app.store.progress.collectAsStateWithLifecycle()
     val updates by vm.updates.collectAsStateWithLifecycle()
+    val session by app.auth.state.collectAsStateWithLifecycle()
+    val unread by vm.unread.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(session) { vm.refreshUnread(session is io.github.velcheor137.shiori.data.auth.SessionState.Authorized) }
 
     LazyColumn(Modifier.fillMaxWidth()) {
         item {
-            Text(
-                "Shiori",
-                modifier = Modifier.padding(start = 16.dp, top = 16.dp),
-                fontFamily = TitleFont,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 26.sp,
-            )
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Shiori", Modifier.weight(1f), fontFamily = TitleFont, fontWeight = FontWeight.SemiBold, fontSize = 26.sp)
+                androidx.compose.material3.IconButton(onClick = { nav.navigate("notifications") }) {
+                    androidx.compose.material3.BadgedBox(badge = { if (unread > 0) androidx.compose.material3.Badge { Text(if (unread > 99) "99+" else "$unread") } }) {
+                        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Notifications, "Уведомления")
+                    }
+                }
+            }
         }
         val last = progress.firstOrNull()
         if (last != null) {

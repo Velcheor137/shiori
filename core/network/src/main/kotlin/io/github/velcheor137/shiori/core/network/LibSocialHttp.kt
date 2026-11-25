@@ -99,6 +99,9 @@ class LibSocialHttp(
 
     suspend fun delete(path: String, withToken: Boolean = true): HttpResult = execute("DELETE", path, null, withToken)
 
+    suspend fun putJson(path: String, json: String, withToken: Boolean = true): HttpResult =
+        execute("PUT", path, json.toRequestBody(JSON), withToken)
+
     private suspend fun execute(method: String, path: String, body: RequestBody?, withToken: Boolean): HttpResult =
         withContext(Dispatchers.IO) {
             val order = listOf(preferredHost) + config.hosts.filter { it != preferredHost }

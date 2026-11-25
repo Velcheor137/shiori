@@ -116,6 +116,7 @@ fun ProfileScreen(nav: androidx.navigation.NavController) {
                 androidx.compose.material3.FilterChip(selected = appTheme == t, onClick = { app.store.setAppTheme(t) }, label = { Text(t.label) })
             }
         }
+        if (state is SessionState.Authorized) OutlinedButton(onClick = { nav.navigate("notifications") }) { Text("Уведомления") }
         OutlinedButton(onClick = { nav.navigate("downloads") }) { Text("Загрузки") }
         OutlinedButton(onClick = { logOpen = true }) { Text("Журнал") }
         Text(

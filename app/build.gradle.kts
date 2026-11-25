@@ -37,8 +37,8 @@ android {
         applicationId = "io.github.velcheor137.shiori"
         minSdk = 26
         targetSdk = 36
-        versionCode = releaseVersion?.let(::versionCodeOf) ?: 7
-        versionName = releaseVersion ?: "0.3.2-dev"
+        versionCode = releaseVersion?.let(::versionCodeOf) ?: 8
+        versionName = releaseVersion ?: "0.4.0-dev"
     }
 
     signingConfigs {

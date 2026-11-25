@@ -1,6 +1,7 @@
 package io.github.velcheor137.shiori
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -67,7 +68,14 @@ enum class CommentSort(val label: String, val apiValue: String) { New("Новы�
  * одновременно), списки сливаются по ключу сортировки. Элемент показывается, только если он не «ниже»
  * последнего загруженного в каждой ещё не исчерпанной ветке — общий порядок верный, а не склейка страниц.
  */
-class CommentsViewModel(private val app: ShioriApp, private val sources: List<Source>) : ViewModel() {
+class CommentsViewModel(
+    private val app: ShioriApp,
+    private val sources: List<Source>,
+    /** Комментарий, к которому нужно прокрутить (из уведомления), и корень его ветки. */
+    private val focusComment: Long? = null,
+    val focusRoot: Long? = null,
+) : ViewModel() {
+    private var focusPages = 0
     data class Source(val branchId: Long, val postId: Long, val label: String)
 
     data class BranchState(
@@ -120,6 +128,32 @@ class CommentsViewModel(private val app: ShioriApp, private val sources: List<So
                 }
             }.awaitAll().forEach { u -> if (sort.value == sortNow) branches.value = branches.value.map { if (it.source.branchId == u.source.branchId) u else it } }
             loading.value = false
+            seekFocus()
+        }
+    }
+
+    /**
+     * Ищем ветку нужного комментария: при сортировке «Новые» догружаем страницы, пока не дойдём до её корня
+     * (не более 15 страниц); если не нашли — подставляем ветку через `GET /api/comments/{id}`.
+     */
+    private fun seekFocus() {
+        val root = focusRoot ?: return
+        val states = branches.value
+        if (states.any { b -> b.roots.any { it.id == root } }) return
+        val open = states.filter { it.hasNext && it.error == null }
+        val passed = open.isEmpty() || open.all { b -> (b.roots.lastOrNull()?.id ?: Long.MAX_VALUE) < root }
+        if (!passed && sort.value == CommentSort.New && focusPages++ < 15) {
+            loadMore()
+            return
+        }
+        val target = focusComment ?: root
+        val postId = sources.first().postId
+        viewModelScope.launch {
+            runCatching { app.api.commentThread(target, postId) }.onSuccess { t ->
+                branches.value = branches.value.mapIndexed { i, b ->
+                    if (i != 0) b else b.copy(roots = (t.roots + b.roots).distinctBy { it.id }, replies = (b.replies + t.replies).distinctBy { it.id })
+                }
+            }.onFailure { AppLog.w("COMMENTS", "Ветка комментария $target не загрузилась", it) }
         }
     }
 
@@ -199,6 +233,25 @@ fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, curren
     }
     val currentPostId = sources.firstOrNull { it.branchId == currentBranch }?.postId ?: currentChapterId
     val vm: CommentsViewModel = viewModel(key = "comments-${entry.apiId}") { CommentsViewModel(app, sources) }
+    CommentsSheet(vm, "Комментарии · ${entry.label}", null, sources, currentBranch, currentPostId, null)
+}
+
+/**
+ * Окно комментариев. [subtitle] — строка над окном (тайтл · глава), [focusComment] — комментарий, к которому
+ * прокрутить и который подсветить (ветка ответов раскрывается).
+ */
+@Composable
+fun CommentsSheet(
+    vm: CommentsViewModel,
+    header: String,
+    subtitle: String?,
+    sources: List<CommentsViewModel.Source>,
+    currentBranch: Long,
+    currentPostId: Long,
+    focusComment: Long?,
+) {
+    val context = LocalContext.current
+    val app = context.shiori
     val branches by vm.branches.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
@@ -215,8 +268,22 @@ fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, curren
 
     fun vote(c: Comment, v: Int) = if (authorized) vm.vote(c, v, toast) else toast("Войдите в аккаунт, чтобы голосовать")
 
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var focused by remember { mutableStateOf(false) }
+    val focusRoot = vm.focusRoot
+    androidx.compose.runtime.LaunchedEffect(items, focusRoot) {
+        if (focusRoot == null || focused) return@LaunchedEffect
+        val index = items.indexOfFirst { it.comment.id == focusRoot }
+        if (index >= 0) {
+            expanded[focusRoot] = true
+            listState.animateScrollToItem(index)
+            focused = true
+        }
+    }
+
     Column(Modifier.fillMaxWidth().heightIn(max = 720.dp).imePadding()) {
-        Text("Комментарии · ${entry.label}", Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.SemiBold)
+        subtitle?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary) }
+        Text(header, Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.SemiBold)
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CommentSort.entries.forEach { s -> FilterChip(selected = sort == s, onClick = { vm.setSort(s) }, label = { Text(s.label) }) }
             Spacer(Modifier.width(8.dp))
@@ -232,7 +299,7 @@ fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, curren
                 TextButton(onClick = { vm.retry(b.source.branchId) }) { Text("Повторить") }
             }
         }
-        LazyColumn(Modifier.weight(1f, fill = false)) {
+        LazyColumn(Modifier.weight(1f, fill = false), state = listState) {
             if (items.isEmpty() && !loading) item { Text("Комментариев пока нет", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(items, key = { it.comment.id }) { t ->
                 val tag = when {
@@ -240,11 +307,11 @@ fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, curren
                     sources.size > 1 -> t.labels.first()
                     else -> null
                 }
-                CommentItem(t.comment, tag, indent = false, onVote = { v -> vote(t.comment, v) }, onReply = { replyTo = t.comment })
+                CommentItem(t.comment, tag, indent = false, highlight = t.comment.id == focusComment, onVote = { v -> vote(t.comment, v) }, onReply = { replyTo = t.comment })
                 val replies = repliesByRoot[t.comment.id].orEmpty().sortedBy { it.id }
                 if (replies.isNotEmpty()) {
                     if (expanded[t.comment.id] == true) {
-                        replies.forEach { r -> CommentItem(r, null, indent = true, onVote = { v -> vote(r, v) }, onReply = { replyTo = r }) }
+                        replies.forEach { r -> CommentItem(r, null, indent = true, highlight = r.id == focusComment, onVote = { v -> vote(r, v) }, onReply = { replyTo = r }) }
                     } else {
                         TextButton(onClick = { expanded[t.comment.id] = true }, modifier = Modifier.padding(start = 52.dp)) { Text("Показать ответы: ${replies.size}") }
                     }
@@ -299,8 +366,12 @@ fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, curren
 }
 
 @Composable
-private fun CommentItem(c: Comment, tag: String?, indent: Boolean, onVote: (Int) -> Unit, onReply: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(start = if (indent) 52.dp else 16.dp, end = 8.dp, top = 10.dp)) {
+private fun CommentItem(c: Comment, tag: String?, indent: Boolean, highlight: Boolean = false, onVote: (Int) -> Unit, onReply: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .then(if (highlight) Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)) else Modifier)
+            .padding(start = if (indent) 52.dp else 16.dp, end = 8.dp, top = 10.dp),
+    ) {
         if (c.avatar != null) {
             AsyncImage(c.avatar, null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
         } else {

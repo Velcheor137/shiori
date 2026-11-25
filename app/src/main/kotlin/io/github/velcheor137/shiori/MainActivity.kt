@@ -109,6 +109,7 @@ private fun ShioriNav() {
                     DownloadScreen(nav, e.arguments?.getString("slug").orEmpty())
                 }
                 composable("downloads") { DownloadsOverviewScreen(nav) }
+                composable("notifications") { NotificationsScreen(nav) }
             }
         }
         if (showBar) BottomBar(nav, route)
