@@ -1,0 +1,24 @@
+# Gradle / build
+.gradle/
+build/
+**/build/
+local.properties
+.kotlin/
+
+# IDE
+.idea/
+*.iml
+
+# Секреты и ключи подписи
+*.jks
+*.keystore
+keystore/
+
+# Сырые снимки запросов и исследовательские данные
+*.har
+research/raw/
+
+# Артефакты
+*.apk
+*.aab
+captures/
