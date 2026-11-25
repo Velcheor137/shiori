@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.velcheor137.shiori.core.common.AppLog
 import io.github.velcheor137.shiori.data.auth.AuthRepository
 import io.github.velcheor137.shiori.data.auth.MeCheck
 import io.github.velcheor137.shiori.data.auth.SessionState
@@ -49,6 +50,7 @@ class MainActivity : ComponentActivity() {
 private fun AccountScreen(auth: AuthRepository) {
     val state by auth.state.collectAsStateWithLifecycle()
     var loginOpen by remember { mutableStateOf(false) }
+    var logOpen by remember { mutableStateOf(false) }
     var check by remember { mutableStateOf<MeCheck?>(null) }
     var busy by remember { mutableStateOf(false) }
     val hosts = remember { mutableStateListOf<String>() }
@@ -62,8 +64,17 @@ private fun AccountScreen(auth: AuthRepository) {
         }
     }
 
+    if (logOpen) {
+        BackHandler { logOpen = false }
+        LogScreen(onBack = { logOpen = false })
+        return
+    }
+
     if (loginOpen) {
-        BackHandler { loginOpen = false }
+        BackHandler {
+            AppLog.i("UI", "Вход закрыт кнопкой «Назад»")
+            loginOpen = false
+        }
         LoginScreen(
             onSiteAuth = auth::acceptSiteAuth,
             onHost = { if (it !in hosts) hosts += it },
@@ -71,7 +82,10 @@ private fun AccountScreen(auth: AuthRepository) {
                 loginOpen = false
                 runCheck()
             },
-            onCancel = { loginOpen = false },
+            onCancel = {
+                AppLog.i("UI", "Вход закрыт кнопкой «Закрыть»")
+                loginOpen = false
+            },
         )
         return
     }
@@ -87,11 +101,14 @@ private fun AccountScreen(auth: AuthRepository) {
             }
         }
         if (state is SessionState.Authorized) {
-            Button(onClick = ::runCheck, enabled = !busy) { Text(if (busy) "Проверяю…" else "Проверить вход (/auth/me)") }
-            OutlinedButton(onClick = { scope.launch { auth.logout(); check = null } }) { Text("Выйти") }
+            Button(onClick = { AppLog.i("UI", "Нажато «Проверить вход»"); runCheck() }, enabled = !busy) {
+                Text(if (busy) "Проверяю…" else "Проверить вход (/auth/me)")
+            }
+            OutlinedButton(onClick = { AppLog.i("UI", "Нажато «Выйти»"); scope.launch { auth.logout(); check = null } }) { Text("Выйти") }
         } else {
-            Button(onClick = { hosts.clear(); loginOpen = true }) { Text("Войти через ranobelib.me") }
+            Button(onClick = { AppLog.i("UI", "Нажато «Войти»"); hosts.clear(); loginOpen = true }) { Text("Войти в аккаунт") }
         }
+        OutlinedButton(onClick = { logOpen = true }) { Text("Журнал") }
         check?.let { c ->
             Text(
                 buildString {

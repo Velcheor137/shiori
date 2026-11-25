@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 rootProject.name = "shiori"
 
 include(":app")
+include(":core:common")
 include(":core:network")
 include(":core:security")
 include(":data:auth")

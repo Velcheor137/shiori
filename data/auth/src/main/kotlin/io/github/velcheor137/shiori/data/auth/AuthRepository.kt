@@ -1,5 +1,6 @@
 package io.github.velcheor137.shiori.data.auth
 
+import io.github.velcheor137.shiori.core.common.AppLog
 import io.github.velcheor137.shiori.core.network.FailureKind
 import io.github.velcheor137.shiori.core.network.LibSocialHttp
 import io.github.velcheor137.shiori.core.network.OfflineException
@@ -54,6 +55,11 @@ class AuthRepository(
     @Volatile
     private var session: Session? = store.read()?.let { runCatching { json.decodeFromString<Session>(it.decodeToString()) }.getOrNull() }
 
+    init {
+        AppLog.i(TAG, session?.let { "Сессия загружена: user=${it.username} id=${it.userId}, истекает ${java.util.Date(it.expiresAtMillis)}, refresh=${it.refreshToken != null}" }
+            ?: "Сохранённой сессии нет (гость)")
+    }
+
     private val _state = MutableStateFlow(session.toState())
     val state: StateFlow<SessionState> = _state.asStateFlow()
 
@@ -66,10 +72,24 @@ class AuthRepository(
      * со значением ключа или `null`. Возвращает true, если в нём был токен.
      */
     fun acceptSiteAuth(evaluateJsResult: String?): Boolean {
-        val raw = evaluateJsResult?.let { runCatching { json.decodeFromString<String?>(it) }.getOrNull() } ?: return false
-        val site = runCatching { json.decodeFromString<SiteAuth>(raw) }.getOrNull() ?: return false
-        val token = site.token ?: return false
-        val access = token.accessToken?.takeIf { it.isNotBlank() } ?: return false
+        val raw = evaluateJsResult?.let { runCatching { json.decodeFromString<String?>(it) }.getOrNull() }
+        if (raw == null) {
+            AppLog.i(TAG, "localStorage.auth: пусто (${evaluateJsResult?.take(20)})")
+            return false
+        }
+        val keys = runCatching { (json.parseToJsonElement(raw) as? JsonObject)?.keys }.getOrNull()
+        val site = runCatching { json.decodeFromString<SiteAuth>(raw) }.getOrNull()
+        if (site == null) {
+            AppLog.w(TAG, "localStorage.auth: не разобрал JSON, длина ${raw.length}")
+            return false
+        }
+        val token = site.token
+        val access = token?.accessToken?.takeIf { it.isNotBlank() }
+        if (token == null || access == null) {
+            AppLog.i(TAG, "localStorage.auth: токена нет, ключи=$keys")
+            return false
+        }
+        AppLog.i(TAG, "localStorage.auth: токен получен, ключи=$keys, token_type=${token.tokenType}, expires_in=${token.expiresIn}, refresh=${token.refreshToken != null}, timestamp=${token.timestamp}, user=${site.auth?.username} id=${site.auth?.id}")
         val issuedAt = token.timestamp.takeIf { it > 0 } ?: now()
         save(
             Session(
@@ -95,8 +115,12 @@ class AuthRepository(
         if (result.failure == FailureKind.Unauthorized && refresh()) {
             result = runCatching { http.get("/api/auth/me") }.getOrDefault(result)
         }
-        if (!result.isSuccess) return MeCheck(result.host, result.code, result.failure, null, null)
+        if (!result.isSuccess) {
+            AppLog.w(TAG, "/auth/me: не успешно, HTTP ${result.code}, ${result.failure}")
+            return MeCheck(result.host, result.code, result.failure, null, null)
+        }
         val user = parseUser(result.body)
+        AppLog.i(TAG, "/auth/me: успешно, user=${user.second} id=${user.first}, домен ${result.host}")
         session?.let { s -> save(s.copy(userId = user.first ?: s.userId, username = user.second ?: s.username)) }
         return MeCheck(result.host, result.code, null, user.second, user.first)
     }
@@ -104,15 +128,17 @@ class AuthRepository(
     /** `POST /api/auth/oauth/token` с `grant_type=refresh_token`, как делает сайт. */
     suspend fun refresh(): Boolean = refreshMutex.withLock {
         val current = session ?: return false
-        val refreshToken = current.refreshToken ?: return markRelogin()
+        AppLog.i(TAG, "Обновляю токен (refresh)")
+        val refreshToken = current.refreshToken ?: run { AppLog.w(TAG, "refresh_token нет — нужен повторный вход"); return markRelogin() }
         val body = json.encodeToString(
             RefreshRequest.serializer(),
             RefreshRequest(grantType = "refresh_token", clientId = "1", refreshToken = refreshToken, scope = ""),
         )
         val result = runCatching { http.postJson("/api/auth/oauth/token", body, withToken = false) }.getOrNull()
-            ?: return false // нет сети: оставляем сессию, попробуем позже
-        if (!result.isSuccess) return markRelogin()
-        val token = parseToken(result.body) ?: return markRelogin()
+            ?: run { AppLog.w(TAG, "refresh: нет сети, сессия сохранена"); return false }
+        if (!result.isSuccess) { AppLog.w(TAG, "refresh: HTTP ${result.code} — нужен повторный вход"); return markRelogin() }
+        val token = parseToken(result.body) ?: run { AppLog.w(TAG, "refresh: не разобрал ответ — нужен повторный вход"); return markRelogin() }
+        AppLog.i(TAG, "refresh: успешно, expires_in=${token.expiresIn}")
         save(
             current.copy(
                 accessToken = token.accessToken ?: return markRelogin(),
@@ -126,7 +152,8 @@ class AuthRepository(
 
     /** Выход: `DELETE /api/auth/oauth/token` (без гарантии), затем удаление сессии с устройства. */
     suspend fun logout() {
-        if (session != null) runCatching { http.delete("/api/auth/oauth/token") }
+        AppLog.i(TAG, "Выход из аккаунта")
+        if (session != null) runCatching { http.delete("/api/auth/oauth/token") }.onFailure { AppLog.w(TAG, "DELETE token не удался", it) }
         session = null
         store.clear()
         _state.value = SessionState.Guest
@@ -193,6 +220,7 @@ class AuthRepository(
     )
 
     private companion object {
+        const val TAG = "AUTH"
         const val REFRESH_AHEAD_MILLIS = 60 * 60 * 1000L
     }
 }

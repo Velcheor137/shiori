@@ -1,5 +1,6 @@
 package io.github.velcheor137.shiori.core.network
 
+import io.github.velcheor137.shiori.core.common.AppLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
@@ -108,17 +109,33 @@ class LibSocialHttp(
                     .method(method, body)
                     .tag(TokenUse::class.java, TokenUse(withToken))
                     .build()
+                val started = System.nanoTime()
+                AppLog.i(TAG, "→ $method $host$path (токен: ${if (withToken) "если есть сессия" else "нет"})")
                 val result = try {
                     client.newCall(request).execute().use { it.toResult(host) }
                 } catch (e: IOException) {
+                    AppLog.w(TAG, "✗ $method $host$path — сетевая ошибка за ${elapsedMs(started)} мс", e)
                     lastError = e
                     continue
                 }
+                AppLog.i(
+                    TAG,
+                    "← ${result.code} $method $host$path за ${elapsedMs(started)} мс, " +
+                        "json=${result.isJson}, ${result.body.length} симв." +
+                        (result.failure?.let { ", ошибка=$it" } ?: "") +
+                        (result.retryAfterSeconds?.let { ", Retry-After=$it" } ?: ""),
+                )
+                if (!result.isSuccess) AppLog.w(TAG, "Тело ответа (до 600 симв.): ${result.body.take(600)}")
                 // Гейт не пустил — пробуем другой домен; ответы самого API (JSON) не переключают домен.
-                if (result.failure == FailureKind.EdgeBlocked && method == "GET") continue
+                if (result.failure == FailureKind.EdgeBlocked && method == "GET") {
+                    AppLog.w(TAG, "Гейт отклонил запрос на $host — пробую следующий домен")
+                    continue
+                }
+                if (host != preferredHost) AppLog.i(TAG, "Рабочий домен теперь $host")
                 preferredHost = host
                 return@withContext result
             }
+            AppLog.e(TAG, "Все домены недоступны для $method $path")
             throw OfflineException(order.last(), lastError ?: IOException("Все домены отклонили запрос"))
         }
 
@@ -148,8 +165,11 @@ class LibSocialHttp(
             val useToken = original.tag(TokenUse::class.java)?.enabled ?: true
             val url = original.url
             if (useToken && HostPolicy.mayReceiveToken(url.host, url.scheme)) {
-                tokenProvider.authorization()?.let { builder.header("Authorization", it) }
+                val auth = tokenProvider.authorization()
+                auth?.let { builder.header("Authorization", it) }
+                AppLog.i(TAG, "  заголовки: Site-Id=${config.siteId}, Referer=${config.siteOrigin}/, UA=$userAgent, Authorization=${if (auth != null) "есть" else "нет"}")
             } else {
+                AppLog.i(TAG, "  заголовки: Site-Id=${config.siteId}, Referer=${config.siteOrigin}/, UA=$userAgent, Authorization=нет (хост ${url.host} не в списке или токен не нужен)")
                 builder.removeHeader("Authorization")
             }
             return chain.proceed(builder.build())
@@ -157,6 +177,10 @@ class LibSocialHttp(
     }
 
     companion object {
+        private const val TAG = "HTTP"
+
+        private fun elapsedMs(startNanos: Long) = (System.nanoTime() - startNanos) / 1_000_000
+
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
         /** «Shiori/0.0.1 (Android 16; +https://github.com/Velcheor137/shiori)». */
