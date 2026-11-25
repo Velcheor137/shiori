@@ -499,38 +499,31 @@ private fun ChapterText(
     }
 }
 
-/**
- * Полоса прочитанного справа, как на RanobeLib: тонкий ползунок у самого края. Длина бегунка — доля
- * видимого текста в главе (у длинной главы короче), дорожка почти во всю высоту и едва заметна.
- */
+/** Полоса прочитанного справа, как на RanobeLib: тонкая линия у края, заполняется сверху вниз по мере чтения главы. */
 @Composable
 private fun ReadingScrollbar(list: androidx.compose.foundation.lazy.LazyListState, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
-    val metrics by remember {
+    val progress by remember {
         derivedStateOf {
             val info = list.layoutInfo
             val visible = info.visibleItemsInfo
             val total = info.totalItemsCount
-            if (total == 0 || visible.isEmpty()) 0f to 1f
+            if (total == 0 || visible.isEmpty()) 0f
+            else if (!list.canScrollForward) 1f
             else {
                 val viewport = (info.viewportEndOffset - info.viewportStartOffset).coerceAtLeast(1)
                 val avg = visible.sumOf { it.size }.toFloat() / visible.size
                 val content = (avg * total).coerceAtLeast(viewport.toFloat())
-                val first = visible.first()
-                val scrolled = list.firstVisibleItemIndex * avg + (-first.offset).coerceAtLeast(0)
-                val maxScroll = (content - viewport).coerceAtLeast(1f)
-                (scrolled / maxScroll).coerceIn(0f, 1f) to (viewport / content).coerceIn(0f, 1f)
+                val scrolled = list.firstVisibleItemIndex * avg + (-visible.first().offset).coerceAtLeast(0)
+                (scrolled / (content - viewport).coerceAtLeast(1f)).coerceIn(0f, 1f)
             }
         }
     }
     androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxHeight().width(6.dp).padding(end = 2.dp, top = 12.dp, bottom = 12.dp)) {
-        val (fraction, visibleShare) = metrics
-        val thumb = (maxHeight * visibleShare).coerceIn(40.dp, maxHeight)
-        Box(Modifier.align(Alignment.TopEnd).fillMaxHeight().width(2.dp).background(color.copy(alpha = 0.10f), RoundedCornerShape(1.dp)))
+        Box(Modifier.align(Alignment.TopEnd).fillMaxHeight().width(2.dp).background(color.copy(alpha = 0.12f), RoundedCornerShape(1.dp)))
         Box(
             Modifier.align(Alignment.TopEnd)
-                .padding(top = (maxHeight - thumb) * fraction)
-                .height(thumb).width(2.dp)
-                .background(color.copy(alpha = 0.45f), RoundedCornerShape(1.dp)),
+                .height(maxHeight * progress).width(2.dp)
+                .background(color.copy(alpha = 0.5f), RoundedCornerShape(1.dp)),
         )
     }
 }
