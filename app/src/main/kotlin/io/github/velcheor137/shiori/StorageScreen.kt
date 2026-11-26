@@ -41,6 +41,7 @@ import java.io.File
 
 private data class StorageInfo(
     val images: Long,
+    val manga: Long,
     val chapters: Long,
     val chapterCount: Int,
     val downloads: Long,
@@ -55,17 +56,19 @@ fun StorageScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
     var refresh by remember { mutableIntStateOf(0) }
     var coverMb by remember { mutableIntStateOf(app.ui.int(UiPrefs.COVER_CACHE_MB, 150)) }
+    var mangaMb by remember { mutableIntStateOf(app.ui.int(UiPrefs.MANGA_CACHE_MB, 500)) }
     var chapterLimit by remember { mutableIntStateOf(app.ui.int(UiPrefs.CHAPTER_CACHE_COUNT, 30)) }
     val info by produceState<StorageInfo?>(null, refresh) {
         value = withContext(Dispatchers.IO) {
             val loader = SingletonImageLoader.get(app)
             StorageInfo(
                 images = loader.diskCache?.size ?: 0L,
+                manga = app.mangaImages.sizeBytes(),
                 chapters = app.chapterTextCache.sizeBytes(),
                 chapterCount = app.chapterTextCache.count(),
                 downloads = File(app.filesDir, "downloads").sizeDeep(),
                 log = File(app.filesDir, "logs").sizeDeep(),
-                other = File(app.filesDir, "constants_site3.json").length() + File(app.cacheDir, "WebView").sizeDeep(),
+                other = (app.filesDir.listFiles { f -> f.name.startsWith("constants_site") }?.sumOf { it.length() } ?: 0L) + File(app.cacheDir, "WebView").sizeDeep(),
             )
         }
     }
@@ -89,7 +92,7 @@ fun StorageScreen(nav: NavController) {
             return@Column
         }
         Text(
-            "Всего занято: ${bytes(i.images + i.chapters + i.downloads + i.log + i.other)}",
+            "Всего занято: ${bytes(i.images + i.manga + i.chapters + i.downloads + i.log + i.other)}",
             Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.titleMedium,
         )
@@ -105,6 +108,18 @@ fun StorageScreen(nav: NavController) {
                     SingletonImageLoader.get(app).let { it.diskCache?.clear(); it.memoryCache?.clear() }
                 }
             }) { Text("Очистить") }
+        }
+        Block(
+            title = "Страницы манги",
+            value = "${bytes(i.manga)} из ${if (mangaMb >= 1000) "${mangaMb / 1000} ГБ" else "$mangaMb МБ"}",
+            note = "Загруженные страницы MangaLib; старые удаляются при превышении лимита.",
+        ) {
+            Chips(listOf(250, 500, 1000, 2000), mangaMb, { if (it >= 1000) "${it / 1000} ГБ" else "$it МБ" }) {
+                mangaMb = it
+                app.ui.setInt(UiPrefs.MANGA_CACHE_MB, it)
+                clear("лишние страницы манги") { app.mangaImages.trim() }
+            }
+            OutlinedButton(onClick = { clear("страницы манги") { app.mangaImages.clear() } }) { Text("Очистить") }
         }
         Block(
             title = "Кэш чтения глав",
@@ -127,7 +142,7 @@ fun StorageScreen(nav: NavController) {
             }
         }
         Block(title = "Прочее", value = bytes(i.other), note = "Справочники фильтров и данные окна входа.") {
-            OutlinedButton(onClick = { clear("справочники") { File(app.filesDir, "constants_site3.json").delete() } }) { Text("Очистить справочники") }
+            OutlinedButton(onClick = { clear("справочники") { app.filesDir.listFiles { f -> f.name.startsWith("constants_site") }?.forEach { it.delete() } } }) { Text("Очистить справочники") }
         }
     }
 }

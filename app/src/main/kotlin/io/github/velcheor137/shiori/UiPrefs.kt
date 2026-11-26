@@ -79,9 +79,14 @@ class UiPrefs(context: Context) {
     private fun <T> write(key: String, serializer: KSerializer<T>, value: T) =
         prefs.edit().putString(key, json.encodeToString(serializer, value)).apply()
 
-    var catalog: CatalogPrefs
-        get() = read("catalog", CatalogPrefs.serializer(), CatalogPrefs())
-        set(v) = write("catalog", CatalogPrefs.serializer(), v)
+    /** Каталог у каждого источника свой (у ранобэ — прежний ключ). */
+    fun catalog(source: Source): CatalogPrefs = read(catalogKey(source), CatalogPrefs.serializer(), CatalogPrefs())
+    fun setCatalog(source: Source, v: CatalogPrefs) = write(catalogKey(source), CatalogPrefs.serializer(), v)
+    private fun catalogKey(source: Source) = if (source == Source.Ranobe) "catalog" else "catalog_${source.key}"
+
+    var manga: MangaSettings
+        get() = read("manga_settings", MangaSettings.serializer(), MangaSettings())
+        set(v) = write("manga_settings", MangaSettings.serializer(), v)
 
     fun bool(key: String, default: Boolean) = prefs.getBoolean(key, default)
     fun setBool(key: String, v: Boolean) = prefs.edit().putBoolean(key, v).apply()
@@ -96,6 +101,8 @@ class UiPrefs(context: Context) {
         prefs.edit().apply { if (branchId == null) remove("chapters_filter_$titleId") else putLong("chapters_filter_$titleId", branchId) }.apply()
 
     companion object Keys {
+        const val SOURCE = "source"
+        const val MANGA_CACHE_MB = "cache_manga_mb"
         const val CHAPTERS_DESC = "chapters_desc"
         const val COMMENTS_SORT = "comments_sort"
         const val NOTIFY_CATEGORY = "notify_category"

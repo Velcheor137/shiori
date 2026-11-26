@@ -22,6 +22,8 @@ data class ReadingProgress(
     val block: Int,
     val offset: Int,
     val updatedAt: Long,
+    /** Источник ([Source.key]); у старых записей — ранобэ. */
+    val source: String = "ranobe",
 ) {
     val chapterLabel: String get() = "Том $volume Глава $number"
 }
@@ -39,6 +41,7 @@ data class LocalBookmark(
     val block: Int,
     val excerpt: String,
     val createdAt: Long,
+    val source: String = "ranobe",
 )
 
 enum class AppTheme(val label: String) { Dark("Тёмная"), Light("Светлая"), System("Как в системе") }

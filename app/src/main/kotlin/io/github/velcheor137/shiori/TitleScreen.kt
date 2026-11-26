@@ -171,7 +171,7 @@ fun TitleScreen(nav: NavController, slug: String) {
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            TextButton(onClick = { app.store.pinBranch(d.title.card.id, d.branchId); nav.navigate(Routes.download(slug)) }) {
+                            if (app.source.value.downloads) TextButton(onClick = { app.store.pinBranch(d.title.card.id, d.branchId); nav.navigate(Routes.download(slug)) }) {
                                 Icon(AppIcons.Download, null, Modifier.size(18.dp))
                                 Text(" Скачать")
                             }
@@ -213,7 +213,7 @@ fun TitleScreen(nav: NavController, slug: String) {
                         current = progress?.let { it.volume to it.number },
                         downloaded = downloaded,
                         onOpen = { c, b -> open(c, b, restore = progress != null && b == progress.branchId && c.volume == progress.volume && c.number == progress.number) },
-                        onDownload = { c, b ->
+                        onDownload = if (!app.source.value.downloads) null else { c, b ->
                             val v = c.version(b) ?: return@chapterTree
                             Downloader.enqueue(context, listOf(DownloadTask(d.title.card.id, slug, d.title.card.name, b, c.volume, c.number, v.versionId, withImages = true)), wifiOnly = false)
                             android.widget.Toast.makeText(context, "Глава добавлена в загрузки", android.widget.Toast.LENGTH_SHORT).show()

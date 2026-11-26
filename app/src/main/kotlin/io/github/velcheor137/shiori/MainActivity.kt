@@ -1,6 +1,7 @@
 package io.github.velcheor137.shiori
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -27,6 +28,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -52,7 +54,9 @@ class MainActivity : ComponentActivity() {
                 onDispose { }
             }
             ShioriTheme {
-                Surface(Modifier.fillMaxSize()) { ShioriNav() }
+                // Смена источника — новый граф навигации: экраны и их модели создаются заново для нового сайта.
+                val source by shiori.source.collectAsState()
+                Surface(Modifier.fillMaxSize()) { androidx.compose.runtime.key(source) { ShioriNav("home") } }
             }
         }
     }
@@ -84,7 +88,7 @@ private fun Opaque(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun ShioriNav() {
+private fun ShioriNav(start: String) {
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
@@ -94,7 +98,7 @@ private fun ShioriNav() {
         Box(Modifier.weight(1f)) {
             NavHost(
                 nav,
-                startDestination = "home",
+                startDestination = start,
                 // Короткий сдвиг с затуханием вместо стандартного медленного fade; экраны непрозрачные (см. screen()).
                 enterTransition = {
                     if (initialState.destination.route in tabRoutes && targetState.destination.route in tabRoutes) fadeIn(tween(NAV_MS))
@@ -109,6 +113,13 @@ private fun ShioriNav() {
                 },
                 popExitTransition = {
                     slideOutHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { it }
+                },
+                // Жест «назад» (predictive back, Android 14+): экран уезжает вправо за пальцем, без уменьшения.
+                predictivePopEnterTransition = {
+                    slideInHorizontally(tween(NAV_MS, easing = LinearEasing)) { -it / 10 }
+                },
+                predictivePopExitTransition = {
+                    slideOutHorizontally(tween(NAV_MS, easing = LinearEasing)) { it }
                 },
             ) {
                 composable("home") { Opaque { HomeScreen(nav) } }

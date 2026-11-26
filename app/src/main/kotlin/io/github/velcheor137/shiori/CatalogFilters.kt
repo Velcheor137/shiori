@@ -60,8 +60,8 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /** Справочники фильтров: файл на диске, обновляется раз в 7 дней; при ошибке сети — старая копия. */
-class FilterConstantsRepo(private val app: ShioriApp) {
-    private val file = File(app.filesDir, "constants_site3.json")
+class FilterConstantsRepo(private val app: ShioriApp, private val source: Source) {
+    private val file = File(app.filesDir, "constants_site${source.siteId}.json")
     private val lock = Mutex()
     @Volatile private var memory: FilterConstants? = null
 
@@ -69,9 +69,9 @@ class FilterConstantsRepo(private val app: ShioriApp) {
         memory?.let { return it }
         withContext(Dispatchers.IO) {
             val fresh = file.exists() && System.currentTimeMillis() - file.lastModified() < 7L * 24 * 3600 * 1000
-            val body = if (fresh) file.readText() else runCatching { app.api.constantsRaw().also { file.writeText(it) } }
+            val body = if (fresh) file.readText() else runCatching { app.apiFor(source).constantsRaw().also { file.writeText(it) } }
                 .getOrElse { if (file.exists()) { AppLog.w("FILTERS", "Справочники не обновились, беру старые", it); file.readText() } else throw it }
-            FilterConstants.parse(body, 3).also { memory = it }
+            FilterConstants.parse(body, source.siteId).also { memory = it }
         }
     }
 }

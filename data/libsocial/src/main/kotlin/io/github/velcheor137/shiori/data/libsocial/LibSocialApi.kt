@@ -22,14 +22,14 @@ import java.net.URLEncoder
  * Запросы к API LibSocial для RanobeLib (таблица §2.4 плана). Разбор — защитный: поля читаются из
  * `JsonObject`, отсутствие поля не роняет экран.
  */
-class LibSocialApi(private val http: LibSocialHttp) {
+class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /** @param filter готовая часть строки запроса с фильтрами сайта (`&genres[]=…`), см. `CatalogFilter.toQuery`. */
     suspend fun catalog(query: String, page: Int, sort: CatalogSort, filter: String = ""): Page<TitleCard> {
         val q = if (query.isBlank()) "" else "&q=" + enc(query.trim())
         val sortPart = if (query.isBlank()) "&sort_by=${sort.apiValue}&sort_type=desc" else ""
-        val root = getObject("/api/manga?site_id[]=3&page=$page&limit=30&chapters[min]=1$sortPart$q$filter&fields[]=rate_avg&fields[]=rate")
+        val root = getObject("/api/manga?site_id[]=$siteId&page=$page&limit=30&chapters[min]=1$sortPart$q$filter&fields[]=rate_avg&fields[]=rate")
         return Page(root.arr("data").mapNotNull { (it as? JsonObject)?.toCard() }, root.obj("meta")?.bool("has_next_page") == true)
     }
 
@@ -120,7 +120,11 @@ class LibSocialApi(private val http: LibSocialHttp) {
             val ao = a as? JsonObject ?: return@mapNotNull null
             Attachment(ao.str("name"), ao.str("id"), ao.str("url") ?: return@mapNotNull null)
         }
-        val blocks = if (restricted) emptyList() else DocumentParser.parse(o["content"]?.takeIf { it !is JsonNull }, attachments)
+        val blocks = if (restricted || o["content"] == null) emptyList() else DocumentParser.parse(o["content"]?.takeIf { it !is JsonNull }, attachments)
+        val pages = o.arr("pages").mapNotNull { p ->
+            val po = p as? JsonObject ?: return@mapNotNull null
+            MangaPage(po.str("url") ?: return@mapNotNull null, po.int("width") ?: 0, po.int("height") ?: 0)
+        }.let { if (restricted) emptyList() else it }
         AppLog.i(TAG, "Глава $slug т$volume г$number ветка $branchId: блоков ${blocks.size}, закрыта=$restricted, формат=${if (o["content"] is JsonObject) "ProseMirror" else "HTML"}")
         return ChapterContent(
             id = o.long("id") ?: 0,
@@ -131,6 +135,7 @@ class LibSocialApi(private val http: LibSocialHttp) {
             blocks = blocks,
             restricted = restricted,
             price = o.obj("restricted_view")?.int("price"),
+            pages = pages,
         )
     }
 
@@ -350,6 +355,13 @@ class LibSocialApi(private val http: LibSocialHttp) {
             (g.str("label") ?: return@mapNotNull null) to (g.str("percent")?.toFloatOrNull() ?: 0f)
         }
     }.getOrDefault(emptyList())
+
+    /** Серверы картинок манги (`/api/constants?fields[]=imageServers`) в порядке перебора. */
+    suspend fun imageServers(): List<String> {
+        val r = http.get("/api/constants?fields[]=imageServers")
+        if (!r.isSuccess) throw ApiException(r.code, describe(r))
+        return ImageServers.parse(r.body, siteId)
+    }
 
     /** Справочники фильтров каталога (жанры, теги, типы…) — сырой JSON, чтобы приложение кэшировало его как есть. */
     suspend fun constantsRaw(): String {

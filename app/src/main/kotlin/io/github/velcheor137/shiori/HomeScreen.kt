@@ -1,6 +1,7 @@
 package io.github.velcheor137.shiori
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +17,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -60,7 +64,10 @@ class HomeViewModel(private val api: LibSocialApi) : ViewModel() {
 fun HomeScreen(nav: NavController) {
     val app = androidx.compose.ui.platform.LocalContext.current.shiori
     val vm: HomeViewModel = viewModel { HomeViewModel(app.api) }
-    val progress by app.store.progress.collectAsStateWithLifecycle()
+    val allProgress by app.store.progress.collectAsStateWithLifecycle()
+    val source by app.source.collectAsStateWithLifecycle()
+    val progress = remember(allProgress, source) { allProgress.filter { it.source == source.key } }
+    var sourceMenu by remember { mutableStateOf(false) }
     val updates by vm.updates.collectAsStateWithLifecycle()
     val session by app.auth.state.collectAsStateWithLifecycle()
     val unread by vm.unread.collectAsStateWithLifecycle()
@@ -69,7 +76,16 @@ fun HomeScreen(nav: NavController) {
     // Шапка закреплена: список прокручивается под ней.
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Shiori", Modifier.weight(1f), fontFamily = TitleFont, fontWeight = FontWeight.SemiBold, fontSize = 26.sp)
+            Text("Shiori", fontFamily = TitleFont, fontWeight = FontWeight.SemiBold, fontSize = 26.sp)
+            // Быстрый переключатель источника.
+            Box(Modifier.weight(1f).padding(start = 8.dp)) {
+                androidx.compose.material3.TextButton(onClick = { sourceMenu = true }) { Text("${source.label} ▾") }
+                androidx.compose.material3.DropdownMenu(expanded = sourceMenu, onDismissRequest = { sourceMenu = false }) {
+                    Source.entries.forEach { s ->
+                        androidx.compose.material3.DropdownMenuItem(text = { Text(s.label) }, onClick = { sourceMenu = false; app.setSource(s) })
+                    }
+                }
+            }
             androidx.compose.material3.IconButton(onClick = { nav.navigate("notifications") }) {
                 androidx.compose.material3.BadgedBox(badge = { if (unread > 0) androidx.compose.material3.Badge { Text(if (unread > 99) "99+" else "$unread") } }) {
                     androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Notifications, "Уведомления")

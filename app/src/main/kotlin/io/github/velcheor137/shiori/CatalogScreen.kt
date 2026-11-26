@@ -62,7 +62,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
-class CatalogViewModel(private val api: LibSocialApi, private val ui: UiPrefs) : ViewModel() {
+class CatalogViewModel(private val api: LibSocialApi, private val ui: UiPrefs, private val source: Source) : ViewModel() {
     data class State(
         val query: String = "",
         val sort: CatalogSort = CatalogSort.Popular,
@@ -79,7 +79,7 @@ class CatalogViewModel(private val api: LibSocialApi, private val ui: UiPrefs) :
     private var job: Job? = null
 
     init {
-        val saved = ui.catalog
+        val saved = ui.catalog(source)
         state = MutableStateFlow(
             State(sort = CatalogSort.entries.firstOrNull { it.name == saved.sort } ?: CatalogSort.Popular, filter = saved.filter, grid = saved.grid),
         )
@@ -88,7 +88,7 @@ class CatalogViewModel(private val api: LibSocialApi, private val ui: UiPrefs) :
 
     private fun persist() {
         val s = state.value
-        ui.catalog = CatalogPrefs(sort = s.sort.name, grid = s.grid, filter = s.filter)
+        ui.setCatalog(source, CatalogPrefs(sort = s.sort.name, grid = s.grid, filter = s.filter))
     }
 
     fun setQuery(q: String) {
@@ -158,7 +158,7 @@ class CatalogViewModel(private val api: LibSocialApi, private val ui: UiPrefs) :
 @Composable
 fun CatalogScreen(nav: NavController) {
     val app = LocalContext.current.shiori
-    val vm: CatalogViewModel = viewModel { CatalogViewModel(app.api, app.ui) }
+    val vm: CatalogViewModel = viewModel { CatalogViewModel(app.api, app.ui, app.source.value) }
     val s by vm.state.collectAsStateWithLifecycle()
     var sortMenu by remember { mutableStateOf(false) }
     var filtersOpen by rememberSaveable { mutableStateOf(false) }

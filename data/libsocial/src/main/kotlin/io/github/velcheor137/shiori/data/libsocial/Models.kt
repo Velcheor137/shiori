@@ -66,7 +66,12 @@ data class ChapterContent(
     val blocks: List<Block>,
     val restricted: Boolean,
     val price: Int?,
+    /** Страницы главы манги (у ранобэ пусто). */
+    val pages: List<MangaPage> = emptyList(),
 )
+
+/** Страница манги: путь от корня сервера картинок и размер исходника (0 — неизвестен). */
+data class MangaPage(val path: String, val width: Int, val height: Int)
 
 data class Comment(
     val id: Long,

@@ -26,13 +26,30 @@ import java.util.concurrent.ConcurrentHashMap
 class ShioriApp : Application(), SingletonImageLoader.Factory {
     lateinit var auth: AuthRepository
         private set
-    lateinit var api: LibSocialApi
-        private set
+    private lateinit var apis: Map<Source, LibSocialApi>
+    /** Текущий источник; экраны пересоздаются при переключении (см. MainActivity). */
+    val source = kotlinx.coroutines.flow.MutableStateFlow(Source.Ranobe)
+    /** API текущего источника. */
+    val api: LibSocialApi get() = apis.getValue(source.value)
+    fun apiFor(s: Source): LibSocialApi = apis.getValue(s)
     lateinit var store: LocalStore
         private set
     lateinit var ui: UiPrefs
         private set
-    val filterConstants by lazy { FilterConstantsRepo(this) }
+    /** Страницы манги: свой дисковый кэш (500 МБ по умолчанию) и очередь загрузок. */
+    val mangaImages by lazy { MangaImages(this, userAgent) }
+    /** Счётчик изменений настроек манги — читалка перечитывает их. */
+    val mangaSettingsVersion = androidx.compose.runtime.mutableIntStateOf(0)
+
+    private val filterRepos = java.util.concurrent.ConcurrentHashMap<Source, FilterConstantsRepo>()
+    val filterConstants: FilterConstantsRepo get() = filterRepos.getOrPut(source.value) { FilterConstantsRepo(this, source.value) }
+
+    fun setSource(s: Source) {
+        if (s == source.value) return
+        AppLog.i("APP", "Источник: ${source.value.label} → ${s.label}")
+        ui.setString(UiPrefs.SOURCE, s.key)
+        source.value = s
+    }
     /** Кэш чтения глав: текущая + следующая + последние N (настройка в «Хранилище»). */
     val chapterTextCache by lazy { ChapterCache(File(cacheDir, "chapters")) { ui.int(UiPrefs.CHAPTER_CACHE_COUNT, 30) + 2 } }
 
@@ -66,10 +83,14 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
         auth = AuthRepository(TokenVault(this))
         val http = LibSocialHttp(config = ApiHostConfig(), userAgent = userAgent, tokenProvider = auth)
         auth.http = http
-        api = LibSocialApi(http)
+        apis = Source.entries.associateWith { s ->
+            if (s == Source.Ranobe) LibSocialApi(http, s.siteId)
+            else LibSocialApi(LibSocialHttp(config = ApiHostConfig(siteOrigin = s.origin, siteId = s.siteId), userAgent = userAgent, tokenProvider = auth), s.siteId)
+        }
         store = LocalStore(this)
         ui = UiPrefs(this)
-        appScope.launch { chapterTextCache.trim() }
+        source.value = Source.of(ui.string(UiPrefs.SOURCE, Source.Ranobe.key))
+        appScope.launch { chapterTextCache.trim(); mangaImages.trim() }
     }
 
     /** Обложки и картинки глав: `Referer` сайта обязателен для CDN, токен туда не уходит. */
@@ -78,7 +99,7 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
             .addInterceptor { chain ->
                 chain.proceed(
                     chain.request().newBuilder()
-                        .header("Referer", "https://ranobelib.me/")
+                        .header("Referer", source.value.origin + "/")
                         .header("User-Agent", userAgent)
                         .build(),
                 )

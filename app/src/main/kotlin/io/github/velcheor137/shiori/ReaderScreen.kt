@@ -160,6 +160,16 @@ class ReaderViewModel(
         }
     }
 
+    /** Страницы следующей главы (для предзагрузки картинок): из кэша чтения или из сети. */
+    suspend fun nextChapterPages(d: Data): List<io.github.velcheor137.shiori.data.libsocial.MangaPage>? {
+        val next = d.next ?: return null
+        return runCatching {
+            val raw = app.chapterTextCache.get(slug, branchId, next.volume, next.number)
+                ?: app.api.chapterRaw(slug, next.volume, next.number, branchId).also { app.chapterTextCache.put(slug, branchId, next.volume, next.number, it) }
+            app.api.parseChapter(raw, next.volume, next.number, branchId).pages
+        }.onFailure { AppLog.w("MANGA", "Следующая глава не загрузилась заранее", it) }.getOrNull()
+    }
+
     /** Следующая глава заранее попадает в кэш чтения, чтобы открылась сразу (и без сети). */
     private fun prefetchNext(d: Data) {
         val next = d.next ?: return
@@ -176,14 +186,15 @@ class ReaderViewModel(
 
     fun saveProgress(d: Data, block: Int, offset: Int) {
         app.store.saveProgress(
-            ReadingProgress(d.title.id, slug, d.title.name, d.title.cover, branchId, volume, number, d.chapter.name, block, offset, System.currentTimeMillis()),
+            ReadingProgress(d.title.id, slug, d.title.name, d.title.cover, branchId, volume, number, d.chapter.name, block, offset, System.currentTimeMillis(), app.source.value.key),
         )
     }
 
     /** Синхронизация с закладкой аккаунта (по желанию пользователя, §10.1): глава + номер абзаца, как на сайте. */
     fun syncToAccount(d: Data, block: Int) {
         if (!app.store.syncAccount.value || d.chapter.id == 0L) return
-        val paragraph = d.chapter.blocks.take(block + 1).count { it is Paragraph }.coerceAtLeast(1)
+        // Для манги в закладку уходит номер страницы, для ранобэ — номер абзаца.
+        val paragraph = if (d.chapter.pages.isNotEmpty()) block + 1 else d.chapter.blocks.take(block + 1).count { it is Paragraph }.coerceAtLeast(1)
         app.appScope.launch {
             runCatching {
                 val status = app.accountBookmarks[slug] ?: (app.api.titleBookmark(slug)?.status ?: 1L).also { app.accountBookmarks[slug] = it }
@@ -193,9 +204,9 @@ class ReaderViewModel(
     }
 
     fun addBookmark(d: Data, block: Int) {
-        val excerpt = (d.chapter.blocks.getOrNull(block) as? Paragraph)?.text?.take(120).orEmpty()
+        val excerpt = if (d.chapter.pages.isNotEmpty()) "Страница ${block + 1}" else (d.chapter.blocks.getOrNull(block) as? Paragraph)?.text?.take(120).orEmpty()
         app.store.addBookmark(
-            LocalBookmark(System.currentTimeMillis(), d.title.id, slug, d.title.name, branchId, volume, number, block, excerpt, System.currentTimeMillis()),
+            LocalBookmark(System.currentTimeMillis(), d.title.id, slug, d.title.name, branchId, volume, number, block, excerpt, System.currentTimeMillis(), app.source.value.key),
         )
     }
 }
@@ -221,6 +232,9 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
     var sheet by remember { mutableStateOf(Sheet.None) }
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val mangaPage = remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val mangaJump = remember { mutableStateOf<Int?>(null) }
+    val isManga = (state as? Load.Ready)?.value?.chapter?.pages?.isNotEmpty() == true
 
     ScreenEffects(settings)
     // Панели прячутся, как только начинается прокрутка; показываются по тапу.
@@ -259,7 +273,18 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
         when (val s = state) {
             Load.Loading -> Loading()
             is Load.Error -> ErrorBox(s.message, vm::load)
-            is Load.Ready -> ChapterText(
+            is Load.Ready -> if (s.value.chapter.pages.isNotEmpty()) MangaContent(
+                vm = vm,
+                d = s.value,
+                restore = restore,
+                startBlock = startBlock,
+                page = mangaPage,
+                jump = mangaJump,
+                onTapCenter = { bars = !bars },
+                onScrollStart = { bars = false },
+                onPrev = { s.value.prev?.let(::goTo) },
+                onNext = { s.value.next?.let(::goTo) },
+            ) else ChapterText(
                 vm = vm,
                 d = s.value,
                 settings = settings,
@@ -325,7 +350,7 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
         ModalBottomSheet(onDismissRequest = { sheet = Sheet.None }, sheetState = sheetState) {
             val d = (state as? Load.Ready)?.value
             when (sheet) {
-                Sheet.Settings -> ReaderSettingsPanel(settings) { t -> app.store.updateSettings(t) }
+                Sheet.Settings -> if (isManga) MangaSettingsPanel(settings) { t -> app.store.updateSettings { t } } else ReaderSettingsPanel(settings) { t -> app.store.updateSettings(t) }
                 Sheet.Chapters -> ChaptersPanel(
                     all = app.chapterCache[slug].orEmpty(),
                     initialBranch = branchId,
@@ -336,13 +361,13 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
                 Sheet.Bookmarks -> if (d != null) BookmarksPanel(
                     titleId = d.title.id,
                     onAdd = {
-                        vm.addBookmark(d, (list.firstVisibleItemIndex - 1).coerceAtLeast(0))
+                        vm.addBookmark(d, if (isManga) mangaPage.intValue else (list.firstVisibleItemIndex - 1).coerceAtLeast(0))
                         Toast.makeText(app, "Закладка добавлена", Toast.LENGTH_SHORT).show()
                     },
                     onOpen = { b ->
                         sheet = Sheet.None
                         if (b.volume == volume && b.number == number && b.branchId == branchId) {
-                            scope.launch { list.scrollToItem(b.block + 1) }
+                            if (isManga) mangaJump.value = b.block else scope.launch { list.scrollToItem(b.block + 1) }
                         } else {
                             nav.navigate(Routes.reader(b.slug, b.branchId, b.volume, b.number, startBlock = b.block))
                         }
@@ -501,7 +526,7 @@ private fun ChapterText(
                     Text("Глава закрыта (платная или ранний доступ${d.chapter.price?.let { ", $it" } ?: ""}). Shiori не обходит платный доступ.", style = style)
                 }
             } else if (shown.isEmpty()) {
-                item(key = "empty") { Text("В главе нет текста (возможно, удалена правообладателем).", style = style) }
+                item(key = "empty") { Text("В главе нет содержимого (возможно, удалена правообладателем).", style = style) }
             }
             itemsIndexed(shown, key = { i, _ -> "b$i" }) { i, b ->
                 val highlight = settings.highlightParagraph && i + 1 == current

@@ -130,7 +130,8 @@ fun LibraryScreen(nav: NavController) {
 @Composable
 private fun LocalBookmarks(nav: NavController) {
     val app = LocalContext.current.shiori
-    val all by app.store.bookmarks.collectAsStateWithLifecycle()
+    val stored by app.store.bookmarks.collectAsStateWithLifecycle()
+    val all = androidx.compose.runtime.remember(stored) { stored.filter { it.source == app.source.value.key } }
     if (all.isEmpty()) {
         ErrorBox("Закладок пока нет. В читалке нажмите значок закладки на нижней панели.", null)
         return

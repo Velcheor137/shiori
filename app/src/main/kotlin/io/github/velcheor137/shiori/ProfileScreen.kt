@@ -59,7 +59,7 @@ import io.github.velcheor137.shiori.data.libsocial.BookmarkFolder
 import io.github.velcheor137.shiori.data.libsocial.UserProfile
 import kotlinx.coroutines.launch
 
-private data class ProfileData(val user: UserProfile?, val folders: List<BookmarkFolder>, val genres: List<Pair<String, Float>>)
+private data class ProfileData(val user: UserProfile?, val folders: List<BookmarkFolder>, val genres: List<Pair<String, Float>>, val error: String? = null)
 
 /** Профиль: шапка аккаунта из API (аватар, ник, уровень), списки, разделы настроек, выход. */
 @Composable
@@ -107,11 +107,21 @@ fun ProfileScreen(nav: androidx.navigation.NavController) {
     }
 
     val authorized = state as? SessionState.Authorized
-    val data by produceState<ProfileData?>(null, authorized?.userId) {
-        val uid = authorized?.userId ?: return@produceState run { value = null }
-        val user = runCatching { app.api.user(uid) }.onFailure { AppLog.w("PROFILE", "Профиль не загрузился", it) }.getOrNull()
+    // Профиль грузится по частям: шапка, затем списки, затем жанры. Если в сессии нет id
+    // (старый вход), берём его из /api/auth/me — сессия обновится, и загрузка начнётся заново.
+    val data by produceState<ProfileData?>(null, authorized != null, authorized?.userId) {
+        if (authorized == null) { value = null; return@produceState }
+        val uid = authorized.userId ?: run {
+            AppLog.w("PROFILE", "В сессии нет id пользователя, запрашиваю /auth/me")
+            val me = auth.checkMe()
+            if (me.userId == null) value = ProfileData(null, emptyList(), emptyList(), error = "Не удалось получить профиль: ${me.failure ?: "нет id"}")
+            return@produceState
+        }
+        val user = runCatching { app.api.user(uid) }.onFailure { AppLog.w("PROFILE", "Профиль $uid не загрузился", it) }
+        value = ProfileData(user.getOrNull(), emptyList(), emptyList(), error = user.exceptionOrNull()?.let { "Профиль не загрузился: ${it.userMessage()}" })
         val folders = runCatching { app.api.folders(uid) }.getOrDefault(emptyList())
-        value = ProfileData(user, folders, app.api.userTopGenres(uid).take(5))
+        value = value?.copy(folders = folders)
+        value = value?.copy(genres = app.api.userTopGenres(uid).take(5))
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -135,17 +145,37 @@ fun ProfileScreen(nav: androidx.navigation.NavController) {
             }
         }
 
+        SectionLabel("Источник")
+        val source by app.source.collectAsStateWithLifecycle()
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Source.entries.forEach { src ->
+                FilterChip(selected = source == src, onClick = { app.setSource(src) }, label = { Text(src.label + if (src.images) " · манга" else " · ранобэ") })
+            }
+        }
+        Text(
+            "Аккаунт общий. Прогресс, закладки, фильтры и кэш у каждого источника свои.",
+            Modifier.padding(horizontal = 16.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         SectionLabel("Приложение")
         if (authorized != null) NavRow(Icons.Filled.Notifications, "Уведомления") { nav.navigate("notifications") }
         NavRow(AppIcons.Download, "Загрузки") { nav.navigate("downloads") }
         NavRow(AppIcons.Storage, "Хранилище", "Кэш глав и картинок, лимиты") { nav.navigate("storage") }
         val appTheme by app.store.appTheme.collectAsStateWithLifecycle()
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Подпись — в своей строке, чипы — под ней (иначе на узком экране «Тема» сжимается в столбик).
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(AppIcons.Palette, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(16.dp))
-            Text("Тема", Modifier.weight(1f))
+            Text("Тема")
+        }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 56.dp, end = 16.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             AppTheme.entries.forEach { t ->
-                FilterChip(selected = appTheme == t, onClick = { app.store.setAppTheme(t) }, label = { Text(t.label) }, modifier = Modifier.padding(start = 4.dp))
+                FilterChip(selected = appTheme == t, onClick = { app.store.setAppTheme(t) }, label = { Text(t.label, maxLines = 1) })
             }
         }
         if (authorized != null) {
@@ -214,7 +244,10 @@ private fun AccountHeader(s: SessionState.Authorized, data: ProfileData?) {
                     user?.loginStreak?.takeIf { it > 0 }?.let { "серия входов $it дн." },
                 ).joinToString(" · ")
                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (data == null) Text("Загружаю профиль…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                when {
+                    data == null -> Text("Загружаю профиль…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    data.error != null -> Text(data.error, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }
