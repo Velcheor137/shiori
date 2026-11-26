@@ -4,6 +4,8 @@ import android.app.Activity
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -235,6 +237,8 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
     val mangaPage = remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val mangaJump = remember { mutableStateOf<Int?>(null) }
     val isManga = (state as? Load.Ready)?.value?.chapter?.pages?.isNotEmpty() == true
+    var pagePicker by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(pagePicker) { pagePicker = false }
 
     ScreenEffects(settings)
     // Панели прячутся, как только начинается прокрутка; показываются по тапу.
@@ -320,7 +324,7 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
             }
         }
         AnimatedVisibility(
-            bars,
+            bars && !pagePicker,
             enter = slideInVertically(tween(220)) { it } + fadeIn(tween(220)),
             exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(200)),
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -341,6 +345,41 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
                 IconButton(onClick = { ready?.next?.let(::goTo) }, enabled = ready?.next != null) {
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, "Следующая глава", tint = if (ready?.next != null) colors.text else colors.secondary.copy(alpha = 0.4f))
                 }
+            }
+        }
+    }
+
+    // Манга: номер страницы над панелью; нажатие — окно выбора страницы.
+    val mangaReady = (state as? Load.Ready)?.value?.takeIf { it.chapter.pages.isNotEmpty() }
+    if (mangaReady != null) {
+        Box(Modifier.fillMaxSize()) {
+            val total = mangaReady.chapter.pages.size
+            val lift by androidx.compose.animation.core.animateDpAsState(if (bars) 84.dp else 12.dp, tween(220), label = "pageLift")
+            if (!pagePicker) {
+                Text(
+                    "${mangaPage.intValue + 1} / $total",
+                    Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = lift)
+                        .clip(RoundedCornerShape(12.dp)).background(androidx.compose.ui.graphics.Color(0x99000000))
+                        .clickable { pagePicker = true }.padding(horizontal = 12.dp, vertical = 4.dp),
+                    color = androidx.compose.ui.graphics.Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 15.sp,
+                )
+            }
+            AnimatedVisibility(
+                pagePicker,
+                enter = slideInVertically(tween(220)) { it } + fadeIn(tween(220)),
+                exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(200)),
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
+                PagePicker(
+                    page = mangaPage.intValue,
+                    total = total,
+                    panel = colors.panel,
+                    text = colors.text,
+                    onPick = { mangaJump.value = it },
+                    onClose = { pagePicker = false },
+                )
             }
         }
     }

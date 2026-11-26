@@ -16,6 +16,10 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -389,14 +393,6 @@ private fun Paged(
             }
             }
         }
-        if (pager.currentPage < pages.size) {
-            Text(
-                "${pager.currentPage + 1} / ${pages.size}",
-                Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp).background(Color(0x99000000), MaterialTheme.shapes.small).padding(horizontal = 8.dp, vertical = 2.dp),
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
     }
 }
 
@@ -478,5 +474,38 @@ private fun Label(text: String) = Text(text, style = MaterialTheme.typography.la
 private fun <T> ChipRow(values: List<T>, selected: T, label: (T) -> String, onPick: (T) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         values.forEach { v -> FilterChip(selected = v == selected, onClick = { onPick(v) }, label = { Text(label(v)) }) }
+    }
+}
+
+/** Окно «Выберите страницу»: ползунок с делениями по страницам, переход сразу при перетаскивании. */
+@Composable
+fun PagePicker(page: Int, total: Int, panel: Color, text: Color, onPick: (Int) -> Unit, onClose: () -> Unit) {
+    var value by remember(total) { mutableFloatStateOf(page.toFloat()) }
+    Column(
+        Modifier.windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.navigationBars)
+            .padding(horizontal = 12.dp, vertical = 12.dp).fillMaxWidth()
+            .background(panel.copy(alpha = 0.97f), androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+            .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Выберите страницу", Modifier.weight(1f), color = text, style = MaterialTheme.typography.titleMedium)
+            Text("${value.toInt() + 1} / $total", color = text.copy(alpha = 0.7f), style = MaterialTheme.typography.labelLarge)
+            androidx.compose.material3.IconButton(onClick = onClose) {
+                androidx.compose.material3.Icon(Icons.Filled.Close, "Закрыть", tint = text)
+            }
+        }
+        if (total > 1) {
+            Slider(
+                value = value,
+                onValueChange = { v ->
+                    val p = kotlin.math.round(v).toInt()
+                    if (p != value.toInt()) onPick(p)
+                    value = p.toFloat()
+                },
+                valueRange = 0f..(total - 1).toFloat(),
+                steps = (total - 2).coerceIn(0, 200),
+                modifier = Modifier.padding(end = 12.dp),
+            )
+        }
     }
 }
