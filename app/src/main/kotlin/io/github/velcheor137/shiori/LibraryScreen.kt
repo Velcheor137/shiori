@@ -154,7 +154,13 @@ private fun LocalBookmarks(nav: NavController) {
 @Composable
 private fun AccountLists(nav: NavController, session: SessionState, vm: LibraryViewModel, s: LibraryViewModel.State) {
     if (session !is SessionState.Authorized) {
-        ErrorBox("Ваши списки RanobeLib появятся после входа в аккаунт (вкладка «Профиль»).", null)
+        ErrorBox("Ваши списки появятся после входа в аккаунт (вкладка «Профиль»).", null)
+        return
+    }
+    val offline by LocalContext.current.shiori.offline.collectAsStateWithLifecycle()
+    LaunchedEffect(offline) { if (!offline && s.folders is Load.Error) vm.loadFolders() }
+    if (offline) {
+        ErrorBox("Нет сети — списки аккаунта недоступны.\nЛокальные закладки — во вкладке рядом.", null)
         return
     }
     when (val f = s.folders) {

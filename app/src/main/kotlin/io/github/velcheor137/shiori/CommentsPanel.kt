@@ -248,6 +248,11 @@ fun chapterCommentsVm(cc: ChapterComments): CommentsViewModel {
 
 @Composable
 fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, currentChapterId: Long) {
+    val offline by LocalContext.current.shiori.offline.collectAsStateWithLifecycle()
+    if (offline) {
+        Box(Modifier.padding(16.dp)) { OfflineCommentsNote() }
+        return
+    }
     val cc = rememberChapterComments(slug, entry, currentBranch, currentChapterId)
     CommentsSheet(chapterCommentsVm(cc), "Комментарии · ${entry.label}", null, cc.sources, currentBranch, cc.currentPostId, null)
 }
@@ -575,4 +580,15 @@ private fun CommentBody(c: Comment) {
             AsyncImage(url, null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().clickable { full = null })
         }
     }
+}
+
+/** Заглушка вместо комментариев без сети. */
+@Composable
+fun OfflineCommentsNote() {
+    Text(
+        "Нет сети — комментарии появятся при подключении.",
+        Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium,
+    )
 }

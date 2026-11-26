@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -34,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -59,33 +61,15 @@ import io.github.velcheor137.shiori.data.libsocial.BookmarkFolder
 import io.github.velcheor137.shiori.data.libsocial.UserProfile
 import kotlinx.coroutines.launch
 
-private data class ProfileData(val user: UserProfile?, val folders: List<BookmarkFolder>, val genres: List<Pair<String, Float>>, val error: String? = null)
-
-/** Профиль: шапка аккаунта из API (аватар, ник, уровень), списки, разделы настроек, выход. */
+/** Профиль: только аккаунт (аватар, уровень, списки, жанры), уведомления, загрузки, «Настройки», выход. */
 @Composable
 fun ProfileScreen(nav: androidx.navigation.NavController) {
     val app = LocalContext.current.shiori
     val auth = app.auth
     val state by auth.state.collectAsStateWithLifecycle()
     var loginOpen by remember { mutableStateOf(false) }
-    var logOpen by remember { mutableStateOf(false) }
-    var check by remember { mutableStateOf<MeCheck?>(null) }
-    var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    fun runCheck() {
-        busy = true
-        scope.launch {
-            check = auth.checkMe()
-            busy = false
-        }
-    }
-
-    if (logOpen) {
-        BackHandler { logOpen = false }
-        LogScreen(onBack = { logOpen = false })
-        return
-    }
     if (loginOpen) {
         BackHandler {
             AppLog.i("UI", "Вход закрыт кнопкой «Назад»")
@@ -96,7 +80,7 @@ fun ProfileScreen(nav: androidx.navigation.NavController) {
             onHost = {},
             onDone = {
                 loginOpen = false
-                runCheck()
+                scope.launch { auth.checkMe() }
             },
             onCancel = {
                 AppLog.i("UI", "Вход закрыт кнопкой «Закрыть»")
@@ -107,34 +91,31 @@ fun ProfileScreen(nav: androidx.navigation.NavController) {
     }
 
     val authorized = state as? SessionState.Authorized
-    // Профиль грузится по частям: шапка, затем списки, затем жанры. Если в сессии нет id
-    // (старый вход), берём его из /api/auth/me — сессия обновится, и загрузка начнётся заново.
-    val data by produceState<ProfileData?>(null, authorized != null, authorized?.userId) {
-        if (authorized == null) { value = null; return@produceState }
+    // Профиль сразу из кэша; сеть обновляет его в фоне (не чаще раза в 10 минут), экран меняется только при отличиях.
+    val data by app.profile.data.collectAsStateWithLifecycle()
+    val offline by app.offline.collectAsStateWithLifecycle()
+    LaunchedEffect(authorized?.userId, offline) {
+        if (authorized == null || offline) return@LaunchedEffect
         val uid = authorized.userId ?: run {
             AppLog.w("PROFILE", "В сессии нет id пользователя, запрашиваю /auth/me")
-            val me = auth.checkMe()
-            if (me.userId == null) value = ProfileData(null, emptyList(), emptyList(), error = "Не удалось получить профиль: ${me.failure ?: "нет id"}")
-            return@produceState
+            auth.checkMe() // сессия обновится, эффект перезапустится с id
+            return@LaunchedEffect
         }
-        val user = runCatching { app.api.user(uid) }.onFailure { AppLog.w("PROFILE", "Профиль $uid не загрузился", it) }
-        value = ProfileData(user.getOrNull(), emptyList(), emptyList(), error = user.exceptionOrNull()?.let { "Профиль не загрузился: ${it.userMessage()}" })
-        val folders = runCatching { app.api.folders(uid) }.getOrDefault(emptyList())
-        value = value?.copy(folders = folders)
-        value = value?.copy(genres = app.api.userTopGenres(uid).take(5))
+        app.profile.refresh(app, uid)
     }
+    val shown = data?.takeIf { authorized != null && (authorized.userId == null || it.userId == authorized.userId) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         when {
-            authorized != null -> AccountHeader(authorized, data)
+            authorized != null -> AccountHeader(authorized, shown)
             else -> GuestHeader(state == SessionState.ReloginRequired) { AppLog.i("UI", "Нажато «Войти»"); loginOpen = true }
         }
-        data?.folders?.takeIf { it.isNotEmpty() }?.let { folders ->
+        shown?.folders?.takeIf { it.isNotEmpty() }?.let { folders ->
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 folders.forEach { f -> AssistChip(onClick = { nav.navigate("library") }, label = { Text("${f.name}  ${f.count}") }) }
             }
         }
-        data?.genres?.takeIf { it.isNotEmpty() }?.let { genres ->
+        shown?.genres?.takeIf { it.isNotEmpty() }?.let { genres ->
             SectionLabel("Любимые жанры")
             genres.forEach { (name, percent) ->
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -145,71 +126,16 @@ fun ProfileScreen(nav: androidx.navigation.NavController) {
             }
         }
 
-        SectionLabel("Источник")
-        val source by app.source.collectAsStateWithLifecycle()
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Source.entries.forEach { src ->
-                FilterChip(selected = source == src, onClick = { app.setSource(src) }, label = { Text(src.label + if (src.images) " · манга" else " · ранобэ") })
-            }
-        }
-        Text(
-            "Аккаунт общий. Прогресс, закладки, фильтры и кэш у каждого источника свои.",
-            Modifier.padding(horizontal = 16.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        SectionLabel("Приложение")
+        Spacer(Modifier.height(12.dp))
         if (authorized != null) NavRow(Icons.Filled.Notifications, "Уведомления") { nav.navigate("notifications") }
         NavRow(AppIcons.Download, "Загрузки") { nav.navigate("downloads") }
-        NavRow(AppIcons.Storage, "Хранилище", "Кэш глав и картинок, лимиты") { nav.navigate("storage") }
-        val appTheme by app.store.appTheme.collectAsStateWithLifecycle()
-        // Подпись — в своей строке, чипы — под ней (иначе на узком экране «Тема» сжимается в столбик).
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(AppIcons.Palette, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.width(16.dp))
-            Text("Тема")
-        }
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 56.dp, end = 16.dp, bottom = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            AppTheme.entries.forEach { t ->
-                FilterChip(selected = appTheme == t, onClick = { app.store.setAppTheme(t) }, label = { Text(t.label, maxLines = 1) })
-            }
-        }
+        NavRow(Icons.Filled.Settings, "Настройки", "Источник, тема, офлайн, хранилище, журнал") { nav.navigate("settings") }
         if (authorized != null) {
-            val sync by app.store.syncAccount.collectAsStateWithLifecycle()
-            Row(Modifier.fillMaxWidth().clickable { app.store.setSyncAccount(!sync) }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(AppIcons.Sync, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Прогресс в закладку аккаунта")
-                    Text("При выходе из главы — глава и абзац в закладку на сайте", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(checked = sync, onCheckedChange = { app.store.setSyncAccount(it) })
-            }
-        }
-        NavRow(AppIcons.Article, "Журнал", "Для диагностики, никуда не отправляется") { logOpen = true }
-
-        if (authorized != null) {
-            SectionLabel("Аккаунт")
-            NavRow(Icons.Filled.CheckCircle, if (busy) "Проверяю…" else "Проверить вход", check?.let { c ->
-                if (c.failure == null) "Вход работает: ${c.username}" else "Не прошла: ${c.failure}${c.code?.let { ", HTTP $it" } ?: ""}"
-            } ?: "Сессия до " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(authorized.expiresAtMillis))) {
-                if (!busy) { AppLog.i("UI", "Нажато «Проверить вход»"); runCheck() }
-            }
             NavRow(Icons.AutoMirrored.Filled.ExitToApp, "Выйти", tint = MaterialTheme.colorScheme.error) {
                 AppLog.i("UI", "Нажато «Выйти»")
-                scope.launch { auth.logout(); check = null }
+                scope.launch { auth.logout(); app.clearProfiles() }
             }
         }
-        Text(
-            "Shiori ${BuildConfig.VERSION_NAME} — неофициальный клиент RanobeLib. Не связан с RanobeLib/LibSocial.",
-            Modifier.padding(16.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -271,12 +197,12 @@ private fun GuestHeader(expired: Boolean, onLogin: () -> Unit) {
 }
 
 @Composable
-private fun SectionLabel(text: String) {
+internal fun SectionLabel(text: String) {
     Text(text, Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
 }
 
 @Composable
-private fun NavRow(icon: ImageVector, title: String, subtitle: String? = null, tint: androidx.compose.ui.graphics.Color? = null, onClick: () -> Unit) {
+internal fun NavRow(icon: ImageVector, title: String, subtitle: String? = null, tint: androidx.compose.ui.graphics.Color? = null, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = tint ?: MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(16.dp))

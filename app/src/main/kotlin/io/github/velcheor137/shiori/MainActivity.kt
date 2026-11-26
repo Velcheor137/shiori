@@ -157,6 +157,8 @@ private fun ShioriNav(start: String) {
                 composable("downloads") { Opaque { DownloadsOverviewScreen(nav) } }
                 composable("notifications") { Opaque { NotificationsScreen(nav) } }
                 composable("storage") { Opaque { StorageScreen(nav) } }
+                composable("settings") { Opaque { SettingsScreen(nav) } }
+                composable("log") { Opaque { LogScreen(onBack = { nav.popBackStack() }) } }
             }
         }
         if (showBar) BottomBar(nav, route)

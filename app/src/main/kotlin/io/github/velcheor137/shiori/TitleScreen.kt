@@ -69,9 +69,15 @@ class TitleViewModel(private val app: ShioriApp, private val slug: String) : Vie
         state.value = Load.Loading
         viewModelScope.launch {
             runCatching {
-                val titleJob = async { app.api.title(slug) }
-                val chapters = app.api.chapters(slug).also { app.chapterCache[slug] = it }
-                val title = titleJob.await().also { app.titleCache[slug] = it.card }
+                // Последовательно и с откатом на скачанное: без сети тайтл открывается из сохранённых файлов.
+                val dir = OfflineData.titleId(slug)?.let { DownloadFiles.dir(app, it) }
+                val saved = { dir?.let(OfflineData::card)?.let { offlineDetails(it) } }
+                val title = (if (app.offline.value) saved() else null)
+                    ?: runCatching { app.api.title(slug) }.getOrElse { e -> saved() ?: throw e }
+                app.titleCache[slug] = title.card
+                val chapters = (if (app.offline.value) dir?.let { OfflineData.chapters(it, app.api) } else null)
+                    ?: runCatching { app.api.chapters(slug) }.getOrElse { e -> dir?.let { OfflineData.chapters(it, app.api) } ?: throw e }
+                app.chapterCache[slug] = chapters
                 val branches = branchesOf(title, chapters)
                 val branchId = resolveBranch(title, branches)
                 app.branchLabels[slug] = branchInfos(chapters, title).associate { it.branchId to it.name }
@@ -90,9 +96,16 @@ class TitleViewModel(private val app: ShioriApp, private val slug: String) : Vie
         val ids = branches.map { it.branchId }
         app.store.pinnedBranch(title.card.id)?.takeIf { it in ids }?.let { return it }
         app.store.progress(title.card.id)?.branchId?.takeIf { it in ids }?.let { return it }
-        if (branches.size > 1) app.api.defaultBranchId(title.card.id)?.takeIf { it in ids }?.let { return it }
+        if (branches.size > 1 && !app.offline.value) app.api.defaultBranchId(title.card.id)?.takeIf { it in ids }?.let { return it }
         return branches.maxByOrNull { it.chapterCount }?.branchId ?: 0L
     }
+
+    /** Тайтл без сети: только карточка, описание и жанры недоступны. */
+    private fun offlineDetails(card: io.github.velcheor137.shiori.data.libsocial.TitleCard) = TitleDetails(
+        card = card, summary = "Нет сети — показаны только скачанные данные.", genres = emptyList(), tags = emptyList(),
+        authors = emptyList(), artists = emptyList(), teams = emptyList(), releaseYear = null, translationStatus = null,
+        ageRestriction = null, chapterCount = null, commentsClosed = false,
+    )
 
     fun pin(branchId: Long) {
         val d = (state.value as? Load.Ready)?.value ?: return

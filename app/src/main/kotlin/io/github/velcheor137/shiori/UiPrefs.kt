@@ -102,6 +102,7 @@ class UiPrefs(context: Context) {
 
     companion object Keys {
         const val SOURCE = "source"
+        const val OFFLINE_MANUAL = "offline_manual"
         const val MANGA_CACHE_MB = "cache_manga_mb"
         const val CHAPTERS_DESC = "chapters_desc"
         const val COMMENTS_SORT = "comments_sort"

@@ -28,13 +28,22 @@ import java.security.MessageDigest
  * Путь: files/downloads/{titleId}/{versionId}.json, картинки — files/downloads/{titleId}/img/{sha256(url)}.
  */
 object DownloadFiles {
+    fun root(context: Context) = File(context.filesDir, "downloads")
     fun dir(context: Context, titleId: Long) = File(context.filesDir, "downloads/$titleId")
     fun chapter(context: Context, titleId: Long, versionId: Long) = File(dir(context, titleId), "$versionId.json")
     fun image(context: Context, titleId: Long, url: String) = File(dir(context, titleId), "img/" + sha256(url))
     fun isDownloaded(context: Context, titleId: Long, versionId: Long) = chapter(context, titleId, versionId).exists()
 
     fun downloadedIds(context: Context, titleId: Long): Set<Long> =
-        dir(context, titleId).listFiles()?.mapNotNull { it.name.removeSuffix(".json").takeIf { n -> it.name.endsWith(".json") }?.toLongOrNull() }?.toSet().orEmpty()
+        dir(context, titleId).listFiles()?.mapNotNull { f -> f.name.takeIf { it.endsWith(".json") }?.removeSuffix(".json")?.toLongOrNull() }?.toSet().orEmpty()
+
+    /** Скачана ли именно эта глава этого перевода (по сохранённому списку глав). */
+    fun isChapterDownloaded(context: Context, titleId: Long, branchId: Long, volume: String, number: String): Boolean {
+        val api = (context.applicationContext as ShioriApp).apiFor(Source.Ranobe)
+        val chapters = OfflineData.chapters(dir(context, titleId), api) ?: return false
+        val v = chapters.firstOrNull { it.volume == volume && it.number == number }?.version(branchId) ?: return false
+        return isDownloaded(context, titleId, v.versionId)
+    }
 
     fun sizeBytes(context: Context, titleId: Long): Long = dir(context, titleId).walkTopDown().filter { it.isFile }.sumOf { it.length() }
 
@@ -101,9 +110,17 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             setForegroundSafe(done, total, "${task.titleName}: т${task.volume} г${task.number}")
             mark(task, DownloadTask.State.Running)
             try {
+                // Скачивание — только для ранобэ: явно берём его API, даже если сейчас выбран другой источник.
+                val api = app.apiFor(Source.Ranobe)
+                val dir = DownloadFiles.dir(app, task.titleId)
+                if (!OfflineData.hasTitle(dir)) {
+                    // Карточка и список глав — чтобы тайтл и глава открывались без сети.
+                    val card = app.titleCache[task.slug] ?: api.title(task.slug).card
+                    OfflineData.save(dir, card, api.chaptersRaw(task.slug))
+                }
                 if (!DownloadFiles.isDownloaded(app, task.titleId, task.versionId)) {
-                    val raw = app.api.chapterRaw(task.slug, task.volume, task.number, task.branchId)
-                    val content = app.api.parseChapter(raw, task.volume, task.number, task.branchId)
+                    val raw = api.chapterRaw(task.slug, task.volume, task.number, task.branchId)
+                    val content = api.parseChapter(raw, task.volume, task.number, task.branchId)
                     if (content.restricted) throw ApiException(null, "Глава платная или в раннем доступе — пропущена")
                     if (task.withImages) {
                         content.blocks.filterIsInstance<ImageBlock>().forEach { img ->

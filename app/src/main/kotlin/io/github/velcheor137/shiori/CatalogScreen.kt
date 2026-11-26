@@ -162,6 +162,12 @@ fun CatalogScreen(nav: NavController) {
     val s by vm.state.collectAsStateWithLifecycle()
     var sortMenu by remember { mutableStateOf(false) }
     var filtersOpen by rememberSaveable { mutableStateOf(false) }
+    val offline by app.offline.collectAsStateWithLifecycle()
+    LaunchedEffect(offline) { if (!offline && (s.error != null || s.items.isEmpty())) vm.reload() }
+    if (offline) {
+        ErrorBox("Нет сети — каталог недоступен.\nСкачанные главы — на главной.", null)
+        return
+    }
 
     if (filtersOpen) {
         BackHandler { filtersOpen = false }

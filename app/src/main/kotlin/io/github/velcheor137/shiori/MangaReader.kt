@@ -69,6 +69,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.velcheor137.shiori.core.common.AppLog
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -223,7 +224,8 @@ private fun VerticalStrip(
     val scope = rememberCoroutineScope()
     val cc = d.entry?.let { rememberChapterComments(vm.slug, it, vm.branchId, d.chapter.id) }
     var commentsStarted by remember(d.chapter.id) { mutableStateOf(false) }
-    val inline = if (commentsStarted && cc != null) rememberInlineComments(cc) else null
+    val offline by app.offline.collectAsStateWithLifecycle()
+    val inline = if (commentsStarted && cc != null && !offline) rememberInlineComments(cc) else null
 
     LaunchedEffect(list) { snapshotFlow { list.isScrollInProgress }.collect { if (it) onScrollStart() } }
     LaunchedEffect(list, items) {
@@ -271,10 +273,9 @@ private fun VerticalStrip(
                         }
                     }
                 }
-                if (inline != null) {
-                    val tint: @Composable (@Composable () -> Unit) -> Unit = { content -> MangaTint(settings) { Box(Modifier.padding(horizontal = 16.dp)) { content() } } }
-                    inlineComments(inline, tint)
-                }
+                val tint: @Composable (@Composable () -> Unit) -> Unit = { content -> MangaTint(settings) { Box(Modifier.padding(horizontal = 16.dp)) { content() } } }
+                if (inline != null) inlineComments(inline, tint)
+                else if (offline && cc != null) item(key = "c-offline") { tint { OfflineCommentsNote() } }
             }
         }
     }
@@ -348,10 +349,12 @@ private fun Paged(
         ) { i ->
             if (i == pages.size) {
                 val list = rememberLazyListState()
-                val inline = cc?.let { rememberInlineComments(it) }
+                val offline by app.offline.collectAsStateWithLifecycle()
+                val inline = if (!offline) cc?.let { rememberInlineComments(it) } else null
                 LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
                     item { ChapterEnd(d, settings, onPrev, onNext) }
                     if (inline != null) inlineComments(inline) { content -> MangaTint(settings) { Box(Modifier.padding(horizontal = 16.dp)) { content() } } }
+                    else if (offline) item { MangaTint(settings) { Box(Modifier.padding(horizontal = 16.dp)) { OfflineCommentsNote() } } }
                 }
             } else {
             val zoom = zooms.getOrPut(i) { ZoomState() }

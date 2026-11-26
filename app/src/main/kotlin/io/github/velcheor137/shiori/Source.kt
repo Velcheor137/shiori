@@ -9,6 +9,10 @@ enum class Source(val key: String, val label: String, val siteId: Int, val origi
     Manga("manga", "MangaLib", 1, "https://mangalib.me", images = true),
     ;
 
+    /** Тип контента для подписи в списке источников. */
+    val kind: String get() = if (images) "Манга" else "Ранобэ"
+    val icon: androidx.compose.ui.graphics.vector.ImageVector get() = if (images) AppIcons.Image else AppIcons.Book
+
     /** Скачивание глав для офлайна — пока только текст. */
     val downloads: Boolean get() = !images
 

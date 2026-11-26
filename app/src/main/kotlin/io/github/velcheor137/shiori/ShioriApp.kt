@@ -27,6 +27,10 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
     lateinit var auth: AuthRepository
         private set
     private lateinit var apis: Map<Source, LibSocialApi>
+    /** Сеть и офлайн-режим (автоматически или вручную). */
+    lateinit var net: OfflineState
+        private set
+    val offline: kotlinx.coroutines.flow.StateFlow<Boolean> get() = net.offline
     /** Текущий источник; экраны пересоздаются при переключении (см. MainActivity). */
     val source = kotlinx.coroutines.flow.MutableStateFlow(Source.Ranobe)
     /** API текущего источника. */
@@ -41,8 +45,28 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
     /** Счётчик изменений настроек манги — читалка перечитывает их. */
     val mangaSettingsVersion = androidx.compose.runtime.mutableIntStateOf(0)
 
+    private val profileRepos = java.util.concurrent.ConcurrentHashMap<Source, ProfileRepository>()
+    /** Кэш профиля текущего источника. */
+    val profile: ProfileRepository get() = profileRepos.getOrPut(source.value) { ProfileRepository(filesDir, source.value) }
+    fun clearProfiles() = Source.entries.forEach { profileRepos.getOrPut(it) { ProfileRepository(filesDir, it) }.clear() }
+
     private val filterRepos = java.util.concurrent.ConcurrentHashMap<Source, FilterConstantsRepo>()
     val filterConstants: FilterConstantsRepo get() = filterRepos.getOrPut(source.value) { FilterConstantsRepo(this, source.value) }
+
+    /** Для глав, скачанных до появления офлайн-режима, дописываем карточку и список глав (когда есть сеть). */
+    private suspend fun backfillOffline() {
+        if (offline.value) return
+        val dirs = DownloadFiles.root(this).listFiles()?.filter { it.isDirectory && !OfflineData.hasTitle(it) }.orEmpty()
+        dirs.forEach { dir ->
+            val id = dir.name.toLongOrNull() ?: return@forEach
+            if (DownloadFiles.downloadedIds(this, id).isEmpty()) return@forEach
+            val slug = store.downloads.value.firstOrNull { it.titleId == id }?.slug ?: store.progress(id)?.slug ?: return@forEach
+            val api = apiFor(Source.Ranobe)
+            runCatching { OfflineData.save(dir, api.title(slug).card, api.chaptersRaw(slug)) }
+                .onSuccess { AppLog.i("OFFLINE", "Сохранены данные тайтла $id для офлайна") }
+                .onFailure { AppLog.w("OFFLINE", "Не удалось сохранить данные тайтла $id", it) }
+        }
+    }
 
     fun setSource(s: Source) {
         if (s == source.value) return
@@ -90,7 +114,9 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
         store = LocalStore(this)
         ui = UiPrefs(this)
         source.value = Source.of(ui.string(UiPrefs.SOURCE, Source.Ranobe.key))
+        net = OfflineState(this, ui, appScope)
         appScope.launch { chapterTextCache.trim(); mangaImages.trim() }
+        appScope.launch { backfillOffline() }
     }
 
     /** Обложки и картинки глав: `Referer` сайта обязателен для CDN, токен туда не уходит. */

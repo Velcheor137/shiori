@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -130,12 +131,19 @@ class ReaderViewModel(
         state.value = Load.Loading
         viewModelScope.launch {
             runCatching {
-                val titleJob = async { app.titleCache[slug] ?: app.api.title(slug).card.also { app.titleCache[slug] = it } }
-                val chapters = app.chapterCache[slug] ?: app.api.chapters(slug).also { app.chapterCache[slug] = it }
+                // Без сети (или в офлайн-режиме) тайтл и список глав — из сохранённых при скачивании файлов.
+                // Запросы идут последовательно: ошибка не должна выйти за runCatching (раньше async ронял приложение).
+                val dir = OfflineData.titleId(slug)?.let { DownloadFiles.dir(app, it) }
+                val offline = app.offline.value
+                val title = app.titleCache[slug]
+                    ?: dir?.takeIf { offline }?.let(OfflineData::card)
+                    ?: runCatching { app.api.title(slug).card.also { app.titleCache[slug] = it } }.getOrElse { e -> dir?.let(OfflineData::card) ?: throw e }
+                val chapters = app.chapterCache[slug]
+                    ?: dir?.takeIf { offline }?.let { OfflineData.chapters(it, app.api) }
+                    ?: runCatching { app.api.chapters(slug).also { app.chapterCache[slug] = it } }.getOrElse { e -> dir?.let { OfflineData.chapters(it, app.api) } ?: throw e }
                 val inBranch = chapters.filter { it.version(branchId) != null }
                 val i = inBranch.indexOfFirst { it.volume == volume && it.number == number }
                 val entry = inBranch.getOrNull(i)
-                val title = titleJob.await()
                 val versionId = entry?.version(branchId)?.versionId
                 // Сначала скачанная копия (офлайн), иначе сеть.
                 val local = versionId?.let { DownloadFiles.chapter(app, title.id, it) }?.takeIf { it.exists() }
@@ -314,13 +322,10 @@ fun ReaderScreen(nav: NavController, slug: String, branchId: Long, volume: Strin
                 IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", tint = colors.text) }
                 Column(Modifier.weight(1f)) {
                     Text(ready?.title?.name ?: "", color = colors.text, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        "Том $volume Глава $number" + if (ready?.offline == true) " · скачано" else "",
-                        color = colors.secondary,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                    )
+                    Text("Том $volume Глава $number", color = colors.secondary, fontSize = 12.sp, maxLines = 1)
                 }
+                // Глава открыта из загрузок — значок вместо текста.
+                if (ready?.offline == true) Icon(AppIcons.DownloadDone, "Скачано", Modifier.padding(end = 12.dp).size(20.dp), tint = colors.secondary)
             }
         }
         AnimatedVisibility(
@@ -510,7 +515,9 @@ private fun ChapterText(
     val contentItems = 2 + shown.size + (if (d.chapter.restricted || shown.isEmpty()) 1 else 0)
     var commentsStarted by remember(d.chapter.id) { mutableStateOf(false) }
     val cc = d.entry?.let { rememberChapterComments(vm.slug, it, vm.branchId, d.chapter.id) }
-    val inline = if (commentsStarted && cc != null) rememberInlineComments(cc) else null
+    val offline by app.offline.collectAsStateWithLifecycle()
+    // Без сети комментарии не грузим (заглушка), после подключения лента появится сама.
+    val inline = if (commentsStarted && cc != null && !offline) rememberInlineComments(cc) else null
     val baseScheme = MaterialTheme.colorScheme
     val scheme = remember(colors, baseScheme) {
         baseScheme.copy(
@@ -601,6 +608,7 @@ private fun ChapterText(
                 }
             }
             if (inline != null) inlineComments(inline, tint)
+            else if (offline && cc != null) item(key = "c-offline") { tint { OfflineCommentsNote() } }
         }
       }
         if (settings.showProgress) ReadingScrollbar(list, contentItems, colors.secondary, Modifier.align(Alignment.CenterEnd))

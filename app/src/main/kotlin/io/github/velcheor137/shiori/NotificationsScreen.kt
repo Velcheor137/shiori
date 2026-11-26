@@ -137,6 +137,11 @@ fun NotificationsScreen(nav: NavController) {
         ErrorBox("Уведомления доступны после входа в аккаунт (вкладка «Профиль»).", null)
         return
     }
+    val offline by app.offline.collectAsStateWithLifecycle()
+    if (offline) {
+        ErrorBox("Нет сети — уведомления появятся при подключении.", null)
+        return
+    }
     val vm: NotificationsViewModel = viewModel { NotificationsViewModel(app.api, app.ui) }
     val s by vm.state.collectAsStateWithLifecycle()
     var commentsFor by remember { mutableStateOf<Notification?>(null) }

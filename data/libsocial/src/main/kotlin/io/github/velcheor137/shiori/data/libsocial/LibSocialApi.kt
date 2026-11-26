@@ -72,8 +72,17 @@ class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
         )
     }
 
-    suspend fun chapters(slug: String): List<ChapterEntry> =
-        getObject("/api/manga/$slug/chapters").arr("data").mapNotNull { e ->
+    suspend fun chapters(slug: String): List<ChapterEntry> = parseChapters(chaptersRaw(slug))
+
+    /** Сырой список глав — сохраняется при скачивании для офлайна. */
+    suspend fun chaptersRaw(slug: String): String {
+        val r = http.get("/api/manga/$slug/chapters")
+        if (!r.isSuccess) throw ApiException(r.code, describe(r))
+        return r.body
+    }
+
+    fun parseChapters(raw: String): List<ChapterEntry> =
+        ((runCatching { json.parseToJsonElement(raw) }.getOrNull() as? JsonObject) ?: throw ApiException(null, "Список глав не JSON")).arr("data").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
             ChapterEntry(
                 apiId = o.long("id") ?: return@mapNotNull null,
@@ -319,6 +328,8 @@ class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
 
     suspend fun bookmarks(userId: Long, folderId: Long, page: Int): Page<TitleCard> {
         val root = getObject("/api/bookmarks?user_id=$userId&status=$folderId&page=$page")
+        // Для «Нового в закладках»: есть ли у тайтла в ответе дата последней главы (поле проверяется по журналу).
+        if (page == 1) ((root.arr("data").firstOrNull() as? JsonObject)?.obj("media"))?.let { AppLog.i(TAG, "Ключи тайтла в закладках: ${it.keys}") }
         val items = root.arr("data").mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
             val media = o.obj("media") ?: return@mapNotNull null

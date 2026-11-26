@@ -157,17 +157,18 @@ fun LazyListScope.chapterTree(
                     )
                     if (!v.isOpen) Text("платная  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     v.createdAt?.let { Text(formatDate(it), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    if (onDownload != null) {
-                        IconButton(onClick = { onDownload(c, v.branchId) }, enabled = v.isOpen && v.versionId !in downloaded) {
-                            Icon(
-                                AppIcons.Download,
-                                if (v.versionId in downloaded) "Скачано" else "Скачать",
-                                Modifier.size(20.dp),
-                                tint = if (v.versionId in downloaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                    when {
+                        // Скачанная версия — всегда со значком «скачано» (и в карточке тайтла, и в читалке).
+                        v.versionId in downloaded -> Icon(
+                            AppIcons.DownloadDone,
+                            "Скачано",
+                            Modifier.padding(horizontal = 12.dp).size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        onDownload != null -> IconButton(onClick = { onDownload(c, v.branchId) }, enabled = v.isOpen) {
+                            Icon(AppIcons.Download, "Скачать", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    } else {
-                        Spacer(Modifier.width(12.dp))
+                        else -> Spacer(Modifier.width(12.dp))
                     }
                 }
             }
