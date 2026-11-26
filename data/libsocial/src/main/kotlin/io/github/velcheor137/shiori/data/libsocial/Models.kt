@@ -113,6 +113,19 @@ data class Notification(
     enum class Kind { Chapter, Comment, Other }
 }
 
+data class UserProfile(
+    val id: Long,
+    val username: String,
+    val avatar: String?,
+    val background: String?,
+    val about: String?,
+    val createdAt: String?,
+    val level: Int?,
+    val totalPoints: Long?,
+    val levelPercent: Float?,
+    val loginStreak: Int?,
+)
+
 data class BookmarkFolder(val id: Long, val name: String, val count: Int)
 
 data class Page<T>(val items: List<T>, val hasNext: Boolean)

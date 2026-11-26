@@ -7,7 +7,10 @@ import android.webkit.WebView
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.disk.DiskCache
 import coil3.request.crossfade
+import kotlinx.coroutines.launch
+import okio.Path.Companion.toOkioPath
 import io.github.velcheor137.shiori.core.common.AppLog
 import io.github.velcheor137.shiori.core.network.ApiHostConfig
 import io.github.velcheor137.shiori.core.network.LibSocialHttp
@@ -27,6 +30,11 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
         private set
     lateinit var store: LocalStore
         private set
+    lateinit var ui: UiPrefs
+        private set
+    val filterConstants by lazy { FilterConstantsRepo(this) }
+    /** Кэш чтения глав: текущая + следующая + последние N (настройка в «Хранилище»). */
+    val chapterTextCache by lazy { ChapterCache(File(cacheDir, "chapters")) { ui.int(UiPrefs.CHAPTER_CACHE_COUNT, 30) + 2 } }
 
     /** Список глав тайтла в памяти, чтобы читалка не запрашивала его заново после карточки. */
     val chapterCache = ConcurrentHashMap<String, List<ChapterEntry>>()
@@ -60,6 +68,8 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
         auth.http = http
         api = LibSocialApi(http)
         store = LocalStore(this)
+        ui = UiPrefs(this)
+        appScope.launch { chapterTextCache.trim() }
     }
 
     /** Обложки и картинки глав: `Referer` сайта обязателен для CDN, токен туда не уходит. */
@@ -77,6 +87,13 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
         return ImageLoader.Builder(context)
             .components { add(OkHttpNetworkFetcherFactory(callFactory = { client })) }
             .crossfade(true)
+            // Обложки и картинки комментариев — с явным лимитом (п. 8); меняется в «Хранилище», действует после перезапуска.
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(File(context.cacheDir, "image_cache").toOkioPath())
+                    .maxSizeBytes(ui.int(UiPrefs.COVER_CACHE_MB, 150).toLong() * 1024 * 1024)
+                    .build()
+            }
             .build()
     }
 }

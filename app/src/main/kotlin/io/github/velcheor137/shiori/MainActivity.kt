@@ -1,5 +1,13 @@
 package io.github.velcheor137.shiori
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.material3.MaterialTheme
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -66,6 +74,15 @@ object Routes {
     fun download(slug: String) = "download/${Uri.encode(slug)}"
 }
 
+private const val NAV_MS = 260
+private val tabRoutes = tabs.map { it.route }
+
+/** Непрозрачный фон экрана: при переходе и жесте «назад» старый экран не просвечивает. */
+@Composable
+private fun Opaque(content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) { content() }
+}
+
 @Composable
 private fun ShioriNav() {
     val nav = rememberNavController()
@@ -75,13 +92,31 @@ private fun ShioriNav() {
     val immersive = route?.startsWith("reader") == true
     Column(Modifier.fillMaxSize().then(if (immersive) Modifier else Modifier.safeDrawingPadding())) {
         Box(Modifier.weight(1f)) {
-            NavHost(nav, startDestination = "home") {
-                composable("home") { HomeScreen(nav) }
-                composable("catalog") { CatalogScreen(nav) }
-                composable("library") { LibraryScreen(nav) }
-                composable("profile") { ProfileScreen(nav) }
+            NavHost(
+                nav,
+                startDestination = "home",
+                // Короткий сдвиг с затуханием вместо стандартного медленного fade; экраны непрозрачные (см. screen()).
+                enterTransition = {
+                    if (initialState.destination.route in tabRoutes && targetState.destination.route in tabRoutes) fadeIn(tween(NAV_MS))
+                    else slideInHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { it / 4 } + fadeIn(tween(NAV_MS))
+                },
+                exitTransition = {
+                    if (initialState.destination.route in tabRoutes && targetState.destination.route in tabRoutes) fadeOut(tween(NAV_MS / 2))
+                    else slideOutHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { -it / 10 } + fadeOut(tween(NAV_MS, delayMillis = NAV_MS / 3))
+                },
+                popEnterTransition = {
+                    slideInHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { -it / 10 }
+                },
+                popExitTransition = {
+                    slideOutHorizontally(tween(NAV_MS, easing = FastOutSlowInEasing)) { it }
+                },
+            ) {
+                composable("home") { Opaque { HomeScreen(nav) } }
+                composable("catalog") { Opaque { CatalogScreen(nav) } }
+                composable("library") { Opaque { LibraryScreen(nav) } }
+                composable("profile") { Opaque { ProfileScreen(nav) } }
                 composable("title/{slug}", arguments = listOf(navArgument("slug") { type = NavType.StringType })) { e ->
-                    TitleScreen(nav, e.arguments?.getString("slug").orEmpty())
+                    Opaque { TitleScreen(nav, e.arguments?.getString("slug").orEmpty()) }
                 }
                 composable(
                     "reader/{slug}/{branch}/{volume}/{number}?restore={restore}&block={block}",
@@ -95,7 +130,7 @@ private fun ShioriNav() {
                     ),
                 ) { e ->
                     val a = e.arguments!!
-                    ReaderScreen(
+                    Opaque { ReaderScreen(
                         nav = nav,
                         slug = a.getString("slug").orEmpty(),
                         branchId = a.getLong("branch"),
@@ -103,13 +138,14 @@ private fun ShioriNav() {
                         number = a.getString("number").orEmpty(),
                         restore = a.getBoolean("restore"),
                         startBlock = a.getInt("block"),
-                    )
+                    ) }
                 }
                 composable("download/{slug}", arguments = listOf(navArgument("slug") { type = NavType.StringType })) { e ->
-                    DownloadScreen(nav, e.arguments?.getString("slug").orEmpty())
+                    Opaque { DownloadScreen(nav, e.arguments?.getString("slug").orEmpty()) }
                 }
-                composable("downloads") { DownloadsOverviewScreen(nav) }
-                composable("notifications") { NotificationsScreen(nav) }
+                composable("downloads") { Opaque { DownloadsOverviewScreen(nav) } }
+                composable("notifications") { Opaque { NotificationsScreen(nav) } }
+                composable("storage") { Opaque { StorageScreen(nav) } }
             }
         }
         if (showBar) BottomBar(nav, route)

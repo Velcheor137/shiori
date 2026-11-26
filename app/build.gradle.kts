@@ -86,6 +86,7 @@ dependencies {
     implementation(project(":data:libsocial"))
     implementation(project(":engine:typography"))
     implementation(libs.kotlinx.serialization.json)
+    testImplementation(libs.kotlin.test.junit)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)

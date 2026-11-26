@@ -59,8 +59,9 @@ fun DownloadScreen(nav: NavController, slug: String) {
     var refresh by remember { mutableIntStateOf(0) }
     val downloaded = remember(queue, refresh) { DownloadFiles.downloadedIds(context, title.id) }
     var input by rememberSaveable { mutableStateOf("") }
-    var withImages by rememberSaveable { mutableStateOf(true) }
-    var wifiOnly by rememberSaveable { mutableStateOf(false) }
+    val ui = LocalContext.current.shiori.ui
+    var withImages by remember { mutableStateOf(ui.bool(UiPrefs.DL_IMAGES, true)) }
+    var wifiOnly by remember { mutableStateOf(ui.bool(UiPrefs.DL_WIFI, false)) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     val parsed = remember(input) { ChapterRanges.parse(input) }
@@ -107,8 +108,8 @@ fun DownloadScreen(nav: NavController, slug: String) {
             if (resolved.missing.isNotEmpty()) Text("Нет в этом переводе: ${resolved.missing.joinToString()}. Другой перевод не подставляется.", style = MaterialTheme.typography.bodySmall)
             if (resolved.ambiguous.isNotEmpty()) Text("Номера есть в нескольких томах: ${resolved.ambiguous.joinToString()} — взяты все. Уточнить: «т2:5».", style = MaterialTheme.typography.bodySmall)
         }
-        SwitchRow("С иллюстрациями", withImages) { withImages = it }
-        SwitchRow("Только по Wi‑Fi", wifiOnly) { wifiOnly = it }
+        SwitchRow("С иллюстрациями", withImages) { withImages = it; ui.setBool(UiPrefs.DL_IMAGES, it) }
+        SwitchRow("Только по Wi‑Fi", wifiOnly) { wifiOnly = it; ui.setBool(UiPrefs.DL_WIFI, it) }
         Button(
             enabled = toLoad.isNotEmpty(),
             onClick = {

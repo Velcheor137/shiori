@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -91,7 +92,7 @@ class CommentsViewModel(
 
     val branches = MutableStateFlow(sources.map { BranchState(it) })
     val loading = MutableStateFlow(false)
-    val sort = MutableStateFlow(CommentSort.New)
+    val sort = MutableStateFlow(CommentSort.entries.firstOrNull { it.name == app.ui.string(UiPrefs.COMMENTS_SORT, "") } ?: CommentSort.New)
     private val semaphore = Semaphore(2)
 
     init {
@@ -101,6 +102,7 @@ class CommentsViewModel(
     fun setSort(s: CommentSort) {
         if (sort.value == s) return
         sort.value = s
+        app.ui.setString(UiPrefs.COMMENTS_SORT, s.name)
         branches.value = sources.map { BranchState(it) }
         loading.value = false
         loadMore()
@@ -219,21 +221,188 @@ class CommentsViewModel(
     }
 }
 
+/** Источники комментариев главы: все версии (переводы) главы; для текущего перевода — id загруженной главы. */
+class ChapterComments(val key: String, val sources: List<CommentsViewModel.Source>, val currentBranch: Long, val currentPostId: Long)
+
 @Composable
-fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, currentChapterId: Long) {
-    val context = LocalContext.current
-    val app = context.shiori
-    val labels = remember(slug) { app.branchLabels[slug] ?: branchInfos(app.chapterCache[slug].orEmpty()).associate { it.branchId to it.name } }
-    val sources = remember(entry) {
-        entry.versions.map { v ->
+fun rememberChapterComments(slug: String, entry: ChapterEntry, currentBranch: Long, currentChapterId: Long): ChapterComments {
+    val app = LocalContext.current.shiori
+    return remember(slug, entry, currentBranch, currentChapterId) {
+        val labels = app.branchLabels[slug] ?: branchInfos(app.chapterCache[slug].orEmpty()).associate { it.branchId to it.name }
+        val sources = entry.versions.map { v ->
             val label = labels[v.branchId] ?: v.teamNames.joinToString().ifBlank { v.uploader ?: "Перевод без подписи" }
             val postId = if (v.branchId == currentBranch && currentChapterId != 0L) currentChapterId else v.versionId
             CommentsViewModel.Source(v.branchId, postId, label)
         }
+        val currentPostId = sources.firstOrNull { it.branchId == currentBranch }?.postId ?: currentChapterId
+        ChapterComments("comments-${entry.apiId}", sources, currentBranch, currentPostId)
     }
-    val currentPostId = sources.firstOrNull { it.branchId == currentBranch }?.postId ?: currentChapterId
-    val vm: CommentsViewModel = viewModel(key = "comments-${entry.apiId}") { CommentsViewModel(app, sources) }
-    CommentsSheet(vm, "Комментарии · ${entry.label}", null, sources, currentBranch, currentPostId, null)
+}
+
+/** Один и тот же список для окна и для ленты под главой (общий ключ в пределах экрана читалки). */
+@Composable
+fun chapterCommentsVm(cc: ChapterComments): CommentsViewModel {
+    val app = LocalContext.current.shiori
+    return viewModel(key = cc.key) { CommentsViewModel(app, cc.sources) }
+}
+
+@Composable
+fun CommentsPanel(slug: String, entry: ChapterEntry, currentBranch: Long, currentChapterId: Long) {
+    val cc = rememberChapterComments(slug, entry, currentBranch, currentChapterId)
+    CommentsSheet(chapterCommentsVm(cc), "Комментарии · ${entry.label}", null, cc.sources, currentBranch, cc.currentPostId, null)
+}
+
+/** Состояние ленты комментариев под текстом главы (п. 1 этапа A): как в приложении RanobeLib, с подгрузкой. */
+class InlineComments(
+    val vm: CommentsViewModel,
+    val cc: ChapterComments,
+    val items: List<CommentsViewModel.Tagged>,
+    val more: Boolean,
+    val loading: Boolean,
+    val sort: CommentSort,
+    val branches: List<CommentsViewModel.BranchState>,
+    val repliesByRoot: Map<Long, List<Comment>>,
+    val filter: androidx.compose.runtime.MutableState<Long?>,
+    val expanded: androidx.compose.runtime.snapshots.SnapshotStateMap<Long, Boolean>,
+    val replyTo: androidx.compose.runtime.MutableState<Comment?>,
+    val authorized: Boolean,
+    val toast: (String) -> Unit,
+)
+
+@Composable
+fun rememberInlineComments(cc: ChapterComments): InlineComments {
+    val context = LocalContext.current
+    val app = context.shiori
+    val vm = chapterCommentsVm(cc)
+    val branches by vm.branches.collectAsStateWithLifecycle()
+    val loading by vm.loading.collectAsStateWithLifecycle()
+    val sort by vm.sort.collectAsStateWithLifecycle()
+    val session by app.auth.state.collectAsStateWithLifecycle()
+    val filter = remember(cc.key) { mutableStateOf<Long?>(null) }
+    val expanded = remember(cc.key) { mutableStateMapOf<Long, Boolean>() }
+    val replyTo = remember(cc.key) { mutableStateOf<Comment?>(null) }
+    val (items, more) = remember(branches, filter.value, sort) { vm.merged(filter.value) }
+    val repliesByRoot = remember(branches) { branches.flatMap { it.replies }.distinctBy { it.id }.groupBy { it.rootId ?: it.parentId ?: 0L } }
+    return InlineComments(
+        vm, cc, items, more, loading, sort, branches, repliesByRoot, filter, expanded, replyTo,
+        session is SessionState.Authorized,
+    ) { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+}
+
+/** Лента комментариев элементами общего списка читалки; новая страница грузится, когда низ ленты близко. */
+fun androidx.compose.foundation.lazy.LazyListScope.inlineComments(c: InlineComments, tint: @Composable (@Composable () -> Unit) -> Unit) {
+    fun vote(x: Comment, v: Int) = if (c.authorized) c.vm.vote(x, v, c.toast) else c.toast("Войдите в аккаунт, чтобы голосовать")
+    item(key = "c-head") {
+        tint {
+            Column(Modifier.fillMaxWidth()) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                Text("Комментарии", Modifier.padding(top = 16.dp, bottom = 4.dp), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CommentSort.entries.forEach { s -> FilterChip(selected = c.sort == s, onClick = { c.vm.setSort(s) }, label = { Text(s.label) }) }
+                    if (c.cc.sources.size > 1) {
+                        Spacer(Modifier.width(8.dp))
+                        FilterChip(selected = c.filter.value == null, onClick = { c.filter.value = null }, label = { Text("Все переводы") })
+                        FilterChip(selected = c.filter.value == c.cc.currentBranch, onClick = { c.filter.value = c.cc.currentBranch }, label = { Text("Текущий") })
+                    }
+                }
+                c.branches.filter { it.error != null && (c.filter.value == null || it.source.branchId == c.filter.value) }.forEach { b ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${b.source.label}: ${b.error}", Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { c.vm.retry(b.source.branchId) }) { Text("Повторить") }
+                    }
+                }
+                if (c.authorized) {
+                    CommentComposer(c.vm, c.replyTo.value, { c.replyTo.value = null }, c.cc.currentPostId, c.toast) { sent ->
+                        sent?.let { c.expanded[it.rootId ?: it.id] = true }
+                        c.replyTo.value = null
+                    }
+                } else {
+                    Text("Чтобы написать комментарий, войдите в аккаунт (Профиль).", Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+    items(c.items, key = { "c${it.comment.id}" }) { t ->
+        tint {
+            Column(Modifier.fillMaxWidth()) {
+                val tag = when {
+                    t.branchIds.size > 1 -> "Общий"
+                    c.cc.sources.size > 1 -> t.labels.first()
+                    else -> null
+                }
+                CommentItem(t.comment, tag, indent = false, edge = 0.dp, onVote = { v -> vote(t.comment, v) }, onReply = { c.replyTo.value = t.comment })
+                val replies = c.repliesByRoot[t.comment.id].orEmpty().sortedBy { it.id }
+                if (replies.isNotEmpty()) {
+                    if (c.expanded[t.comment.id] == true) {
+                        replies.forEach { r -> CommentItem(r, null, indent = true, edge = 0.dp, onVote = { v -> vote(r, v) }, onReply = { c.replyTo.value = r }) }
+                    } else {
+                        TextButton(onClick = { c.expanded[t.comment.id] = true }, modifier = Modifier.padding(start = 36.dp)) { Text("Показать ответы: ${replies.size}") }
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            }
+        }
+    }
+    item(key = "c-tail") {
+        tint {
+            androidx.compose.runtime.LaunchedEffect(c.items.size, c.more, c.loading) { if (c.more && !c.loading) c.vm.loadMore() }
+            Column(Modifier.fillMaxWidth().padding(bottom = 120.dp)) {
+                when {
+                    c.loading -> Loading(Modifier.fillMaxWidth().padding(16.dp))
+                    c.items.isEmpty() -> Text("Комментариев пока нет", Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/** Поле ввода комментария/ответа. Отправка — только по явному нажатию пользователя. */
+@Composable
+private fun CommentComposer(
+    vm: CommentsViewModel,
+    replyTo: Comment?,
+    cancelReply: () -> Unit,
+    currentPostId: Long,
+    toast: (String) -> Unit,
+    onSent: (Comment?) -> Unit,
+) {
+    var draft by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    Column {
+        replyTo?.let { r ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Ответ для ${r.author}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                TextButton(onClick = cancelReply) { Text("Отмена") }
+            }
+        }
+        Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                placeholder = { Text(if (replyTo != null) "Ваш ответ" else "Написать комментарий") },
+                modifier = Modifier.weight(1f),
+                maxLines = 5,
+            )
+            IconButton(
+                enabled = draft.isNotBlank() && !sending,
+                onClick = {
+                    sending = true
+                    // Комментарий уходит в версию главы текущего перевода (или к ответу).
+                    val target = replyTo
+                    vm.send(draft, target, currentPostId) { err ->
+                        sending = false
+                        if (err == null) {
+                            draft = ""
+                            onSent(target)
+                            toast("Комментарий отправлен")
+                        } else {
+                            toast("Не отправлено: $err")
+                        }
+                    }
+                },
+            ) { Icon(Icons.AutoMirrored.Filled.Send, "Отправить") }
+        }
+    }
 }
 
 /**
@@ -260,9 +429,7 @@ fun CommentsSheet(
     val (items, more) = remember(branches, filter, sort) { vm.merged(filter) }
     val repliesByRoot = remember(branches) { branches.flatMap { it.replies }.distinctBy { it.id }.groupBy { it.rootId ?: it.parentId ?: 0L } }
     val expanded = remember { mutableStateMapOf<Long, Boolean>() }
-    var draft by remember { mutableStateOf("") }
     var replyTo by remember { mutableStateOf<Comment?>(null) }
-    var sending by remember { mutableStateOf(false) }
     val authorized = session is SessionState.Authorized
     val toast: (String) -> Unit = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
 
@@ -327,50 +494,22 @@ fun CommentsSheet(
         if (!authorized) {
             Text("Чтобы написать комментарий, войдите в аккаунт (Профиль).", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall)
         } else {
-            replyTo?.let { r ->
-                Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Ответ для ${r.author}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                    TextButton(onClick = { replyTo = null }) { Text("Отмена") }
+            Box(Modifier.padding(horizontal = 12.dp)) {
+                CommentComposer(vm, replyTo, { replyTo = null }, currentPostId, toast) { sent ->
+                    sent?.let { expanded[it.rootId ?: it.id] = true }
+                    replyTo = null
                 }
-            }
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    placeholder = { Text(if (replyTo != null) "Ваш ответ" else "Написать комментарий") },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 5,
-                )
-                IconButton(
-                    enabled = draft.isNotBlank() && !sending,
-                    onClick = {
-                        sending = true
-                        // Явное действие пользователя: комментарий уходит в версию главы текущего перевода (или к ответу).
-                        val target = replyTo
-                        vm.send(draft, target, currentPostId) { err ->
-                            sending = false
-                            if (err == null) {
-                                draft = ""
-                                target?.let { expanded[it.rootId ?: it.id] = true }
-                                replyTo = null
-                                toast("Комментарий отправлен")
-                            } else {
-                                toast("Не отправлено: $err")
-                            }
-                        }
-                    },
-                ) { Icon(Icons.AutoMirrored.Filled.Send, "Отправить") }
             }
         }
     }
 }
 
 @Composable
-private fun CommentItem(c: Comment, tag: String?, indent: Boolean, highlight: Boolean = false, onVote: (Int) -> Unit, onReply: () -> Unit) {
+private fun CommentItem(c: Comment, tag: String?, indent: Boolean, highlight: Boolean = false, edge: androidx.compose.ui.unit.Dp = 16.dp, onVote: (Int) -> Unit, onReply: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .then(if (highlight) Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)) else Modifier)
-            .padding(start = if (indent) 52.dp else 16.dp, end = 8.dp, top = 10.dp),
+            .padding(start = if (indent) edge + 36.dp else edge, end = if (edge == 0.dp) 0.dp else 8.dp, top = 10.dp),
     ) {
         if (c.avatar != null) {
             AsyncImage(c.avatar, null, Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)

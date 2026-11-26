@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -140,17 +141,36 @@ class ReaderViewModel(
                     AppLog.i("READER", "Глава открыта из загрузок: ${local.name}")
                     app.api.parseChapter(local.readText(), volume, number, branchId)
                 } else {
-                    app.api.chapter(slug, volume, number, branchId)
+                    // Кэш чтения (п. 8), иначе сеть; закрытые главы не кэшируются.
+                    val cached = app.chapterTextCache.get(slug, branchId, volume, number)
+                        ?.let { raw -> runCatching { app.api.parseChapter(raw, volume, number, branchId) }.getOrNull() }
+                    cached ?: app.api.chapterRaw(slug, volume, number, branchId).let { raw ->
+                        app.api.parseChapter(raw, volume, number, branchId).also { if (!it.restricted) app.chapterTextCache.put(slug, branchId, volume, number, raw) }
+                    }
                 }
                 if (versionId != null && chapter.id != 0L && chapter.id != versionId) {
                     AppLog.w("READER", "H-COM-1: id главы ${chapter.id} ≠ id версии в списке $versionId")
                 }
                 Data(title, chapter, entry, inBranch, inBranch.getOrNull(i - 1), if (i >= 0) inBranch.getOrNull(i + 1) else null, local != null)
-            }.onSuccess { state.value = Load.Ready(it) }
+            }.onSuccess { state.value = Load.Ready(it); prefetchNext(it) }
                 .onFailure {
                     AppLog.e("READER", "Глава $slug т$volume г$number (перевод $branchId) не загрузилась", it)
                     state.value = Load.Error(it.userMessage())
                 }
+        }
+    }
+
+    /** Следующая глава заранее попадает в кэш чтения, чтобы открылась сразу (и без сети). */
+    private fun prefetchNext(d: Data) {
+        val next = d.next ?: return
+        val versionId = next.version(branchId)?.versionId
+        if (versionId != null && DownloadFiles.isDownloaded(app, d.title.id, versionId)) return
+        if (app.chapterTextCache.contains(slug, branchId, next.volume, next.number)) return
+        app.appScope.launch {
+            runCatching {
+                val raw = app.api.chapterRaw(slug, next.volume, next.number, branchId)
+                if (!app.api.parseChapter(raw, next.volume, next.number, branchId).restricted) app.chapterTextCache.put(slug, branchId, next.volume, next.number, raw)
+            }.onFailure { AppLog.w("READER", "Следующая глава не загрузилась заранее", it) }
         }
     }
 
@@ -389,13 +409,19 @@ private fun ChapterText(
         }
         snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }
             .debounce(400)
-            .collect { (i, off) -> vm.saveProgress(d, (i - 1).coerceAtLeast(0), if (i == 0) 0 else off) }
+            .collect { (i, off) ->
+                // В ленте комментариев позиция чтения — последний абзац главы.
+                val last = (shown.size - 1).coerceAtLeast(0)
+                val block = (i - 1).coerceIn(0, last)
+                vm.saveProgress(d, block, if (i == 0 || i - 1 > last) 0 else off)
+            }
     }
     val latest by rememberUpdatedState(list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset)
     DisposableEffect(d.chapter.id) {
         onDispose {
-            val block = (latest.first - 1).coerceAtLeast(0)
-            vm.saveProgress(d, block, if (latest.first == 0) 0 else latest.second)
+            val last = (shown.size - 1).coerceAtLeast(0)
+            val block = (latest.first - 1).coerceIn(0, last)
+            vm.saveProgress(d, block, if (latest.first == 0 || latest.first - 1 > last) 0 else latest.second)
             vm.syncToAccount(d, block)
         }
     }
@@ -413,10 +439,26 @@ private fun ChapterText(
         hyphens = if (settings.hyphens) Hyphens.Auto else Hyphens.None,
         lineBreak = LineBreak.Paragraph,
     )
-    val progress by remember { derivedStateOf { if (list.layoutInfo.totalItemsCount <= 1) 0 else (list.firstVisibleItemIndex * 100 / (list.layoutInfo.totalItemsCount - 1)).coerceIn(0, 100) } }
     val current by remember { derivedStateOf { list.firstVisibleItemIndex } }
 
     val clipboard = LocalContext.current.getSystemService(android.content.ClipboardManager::class.java)
+    // Лента комментариев под главой: создаётся, когда читатель дошёл до конца текста.
+    val contentItems = 2 + shown.size + (if (d.chapter.restricted || shown.isEmpty()) 1 else 0)
+    var commentsStarted by remember(d.chapter.id) { mutableStateOf(false) }
+    val cc = d.entry?.let { rememberChapterComments(vm.slug, it, vm.branchId, d.chapter.id) }
+    val inline = if (commentsStarted && cc != null) rememberInlineComments(cc) else null
+    val baseScheme = MaterialTheme.colorScheme
+    val scheme = remember(colors, baseScheme) {
+        baseScheme.copy(
+            background = colors.background, surface = colors.background, onSurface = colors.text, onBackground = colors.text,
+            onSurfaceVariant = colors.secondary, outline = colors.secondary.copy(alpha = 0.25f), outlineVariant = colors.secondary.copy(alpha = 0.25f),
+        )
+    }
+    val tint: @Composable (@Composable () -> Unit) -> Unit = { content ->
+        MaterialTheme(colorScheme = scheme) {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides colors.text) { content() }
+        }
+    }
     Box(Modifier.fillMaxSize()) {
       SelectionContainer {
         LazyColumn(
@@ -488,27 +530,30 @@ private fun ChapterText(
                 }
             }
             item(key = "foot") {
-                Row(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 120.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                LaunchedEffect(Unit) { commentsStarted = true }
+                Row(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = if (cc != null) 24.dp else 120.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     OutlinedButton(enabled = d.prev != null, onClick = onPrev) { Text("← Пред. глава", color = colors.text) }
                     OutlinedButton(enabled = d.next != null, onClick = onNext) { Text(if (d.next != null) "След. глава →" else "Последняя глава", color = colors.text) }
                 }
             }
+            if (inline != null) inlineComments(inline, tint)
         }
       }
-        if (settings.showProgress) ReadingScrollbar(list, colors.secondary, Modifier.align(Alignment.CenterEnd))
+        if (settings.showProgress) ReadingScrollbar(list, contentItems, colors.secondary, Modifier.align(Alignment.CenterEnd))
     }
 }
 
 /** Полоса прочитанного справа, как на RanobeLib: тонкая линия у края, заполняется сверху вниз по мере чтения главы. */
 @Composable
-private fun ReadingScrollbar(list: androidx.compose.foundation.lazy.LazyListState, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
-    val progress by remember {
+private fun ReadingScrollbar(list: androidx.compose.foundation.lazy.LazyListState, contentItems: Int, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
+    val progress by remember(contentItems) {
         derivedStateOf {
             val info = list.layoutInfo
             val visible = info.visibleItemsInfo
-            val total = info.totalItemsCount
+            // Полоса считает только текст главы: лента комментариев под ней не входит.
+            val total = minOf(info.totalItemsCount, contentItems)
             if (total == 0 || visible.isEmpty()) 0f
-            else if (!list.canScrollForward) 1f
+            else if (!list.canScrollForward || visible.last().index >= contentItems - 1) 1f
             else {
                 val viewport = (info.viewportEndOffset - info.viewportStartOffset).coerceAtLeast(1)
                 val avg = visible.sumOf { it.size }.toFloat() / visible.size

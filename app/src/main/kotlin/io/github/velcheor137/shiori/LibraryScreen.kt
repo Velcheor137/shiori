@@ -38,7 +38,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /** Списки аккаунта RanobeLib: папки закладок («Читаю», «В планах», …) и тайтлы в них. */
-class LibraryViewModel(private val api: LibSocialApi, private val auth: AuthRepository) : ViewModel() {
+class LibraryViewModel(private val api: LibSocialApi, private val auth: AuthRepository, private val ui: UiPrefs) : ViewModel() {
     data class State(
         val folders: Load<List<BookmarkFolder>> = Load.Loading,
         val selected: Int = 0,
@@ -67,7 +67,8 @@ class LibraryViewModel(private val api: LibSocialApi, private val auth: AuthRepo
                 .onSuccess { f ->
                     AppLog.i("LIBRARY", "Папок: ${f.size} (${f.joinToString { "${it.name}=${it.count}" }})")
                     state.value = state.value.copy(folders = Load.Ready(f))
-                    if (f.isNotEmpty()) select(0)
+                    val saved = ui.int(UiPrefs.LIBRARY_FOLDER, -1).toLong()
+                    if (f.isNotEmpty()) select(f.indexOfFirst { it.id == saved }.coerceAtLeast(0))
                 }
                 .onFailure {
                     AppLog.e("LIBRARY", "Папки не загрузились", it)
@@ -78,6 +79,7 @@ class LibraryViewModel(private val api: LibSocialApi, private val auth: AuthRepo
 
     fun select(index: Int) {
         state.value = state.value.copy(selected = index, items = emptyList(), page = 0, hasNext = true, error = null)
+        (state.value.folders as? Load.Ready)?.value?.getOrNull(index)?.let { ui.setInt(UiPrefs.LIBRARY_FOLDER, it.id.toInt()) }
         loadMore()
     }
 
@@ -106,17 +108,17 @@ class LibraryViewModel(private val api: LibSocialApi, private val auth: AuthRepo
 fun LibraryScreen(nav: NavController) {
     val app = LocalContext.current.shiori
     val session by app.auth.state.collectAsStateWithLifecycle()
-    val vm: LibraryViewModel = viewModel { LibraryViewModel(app.api, app.auth) }
+    val vm: LibraryViewModel = viewModel { LibraryViewModel(app.api, app.auth, app.ui) }
     LaunchedEffect(session) { vm.start() }
     val s by vm.state.collectAsStateWithLifecycle()
 
-    var local by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var local by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(app.ui.bool(UiPrefs.LIBRARY_LOCAL, false)) }
     Column(Modifier.fillMaxSize()) {
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             listOf("Списки аккаунта", "Закладки в тексте").forEachIndexed { i, label ->
                 SegmentedButton(
                     selected = local == (i == 1),
-                    onClick = { local = i == 1 },
+                    onClick = { local = i == 1; app.ui.setBool(UiPrefs.LIBRARY_LOCAL, local) },
                     shape = SegmentedButtonDefaults.itemShape(i, 2),
                 ) { Text(label) }
             }

@@ -63,8 +63,9 @@ fun ChaptersPanel(
     onPick: (ChapterEntry, Long) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+    val ui = androidx.compose.ui.platform.LocalContext.current.shiori.ui
     var filter by remember { mutableStateOf<Long?>(null) }
-    var descending by remember { mutableStateOf(false) }
+    var descending by remember { mutableStateOf(ui.bool("reader_chapters_desc", false)) }
     val infos = remember(all) { branchInfos(all) }
     val infoMap = remember(infos) { infos.associateBy { it.branchId } }
     val base = remember(all, filter, descending) {
@@ -88,7 +89,7 @@ fun ChaptersPanel(
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { descending = !descending }) { Text(if (descending) "↓ новые" else "↑ старые") }
+            TextButton(onClick = { descending = !descending; ui.setBool("reader_chapters_desc", descending) }) { Text(if (descending) "↓ новые" else "↑ старые") }
         }
         LazyColumn(state = list) {
             chapterTree(

@@ -57,7 +57,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /** Уведомления аккаунта: новые главы и ответы на комментарии (вкладки как на сайте). */
-class NotificationsViewModel(private val api: LibSocialApi) : ViewModel() {
+class NotificationsViewModel(private val api: LibSocialApi, private val ui: UiPrefs) : ViewModel() {
     enum class Category(val apiValue: String, val label: String) { All("all", "Все"), Chapters("chapter", "Главы"), Replies("comments", "Ответы") }
 
     data class State(
@@ -70,15 +70,26 @@ class NotificationsViewModel(private val api: LibSocialApi) : ViewModel() {
         val error: String? = null,
     )
 
-    val state = MutableStateFlow(State())
+    val state = MutableStateFlow(
+        State(
+            category = Category.entries.firstOrNull { it.name == ui.string(UiPrefs.NOTIFY_CATEGORY, "") } ?: Category.All,
+            unreadOnly = ui.bool(UiPrefs.NOTIFY_UNREAD, true),
+        ),
+    )
 
     init {
         loadMore()
     }
 
-    fun select(c: Category) = reset(state.value.copy(category = c))
+    fun select(c: Category) {
+        ui.setString(UiPrefs.NOTIFY_CATEGORY, c.name)
+        reset(state.value.copy(category = c))
+    }
 
-    fun setUnreadOnly(v: Boolean) = reset(state.value.copy(unreadOnly = v))
+    fun setUnreadOnly(v: Boolean) {
+        ui.setBool(UiPrefs.NOTIFY_UNREAD, v)
+        reset(state.value.copy(unreadOnly = v))
+    }
 
     private fun reset(s: State) {
         state.value = s.copy(items = emptyList(), page = 0, hasNext = true, error = null, loading = false)
@@ -126,7 +137,7 @@ fun NotificationsScreen(nav: NavController) {
         ErrorBox("Уведомления доступны после входа в аккаунт (вкладка «Профиль»).", null)
         return
     }
-    val vm: NotificationsViewModel = viewModel { NotificationsViewModel(app.api) }
+    val vm: NotificationsViewModel = viewModel { NotificationsViewModel(app.api, app.ui) }
     val s by vm.state.collectAsStateWithLifecycle()
     var commentsFor by remember { mutableStateOf<Notification?>(null) }
     val list = rememberLazyListState()

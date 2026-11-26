@@ -131,9 +131,9 @@ fun TitleScreen(nav: NavController, slug: String) {
             val infos = remember(d.chapters) { branchInfos(d.chapters, d.title) }
             val infoMap = remember(infos) { infos.associateBy { it.branchId } }
             var tab by rememberSaveable { mutableStateOf(0) }
-            var descending by rememberSaveable { mutableStateOf(true) }
+            var descending by remember { mutableStateOf(app.ui.bool(UiPrefs.CHAPTERS_DESC, true)) }
             var query by rememberSaveable { mutableStateOf("") }
-            var filter by rememberSaveable { mutableStateOf<Long?>(null) }
+            var filter by remember(d.title.card.id) { mutableStateOf(app.ui.chapterFilter(d.title.card.id)) }
             val context = LocalContext.current
             val queue by app.store.downloads.collectAsStateWithLifecycle()
             val downloaded = remember(d.title.card.id, allProgress, queue) { DownloadFiles.downloadedIds(context, d.title.card.id) }
@@ -187,10 +187,10 @@ fun TitleScreen(nav: NavController, slug: String) {
                 if (tab == 0) {
                     item { About(d.title) }
                 } else {
-                    item { TeamChips(infos, pinned = d.branchId, filter = filter) { filter = it } }
+                    item { TeamChips(infos, pinned = d.branchId, filter = filter) { filter = it; app.ui.setChapterFilter(d.title.card.id, it) } }
                     item {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                            TextButton(onClick = { descending = !descending }) { Text(if (descending) "Сначала новые ↓" else "Сначала старые ↑") }
+                            TextButton(onClick = { descending = !descending; app.ui.setBool(UiPrefs.CHAPTERS_DESC, descending) }) { Text(if (descending) "Сначала новые ↓" else "Сначала старые ↑") }
                             if (currentIndex >= 0) {
                                 TextButton(onClick = { scope.launch { list.animateScrollToItem(currentIndex + 6) } }) { Text("К текущей главе") }
                             }

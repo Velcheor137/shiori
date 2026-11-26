@@ -25,10 +25,11 @@ import java.net.URLEncoder
 class LibSocialApi(private val http: LibSocialHttp) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    suspend fun catalog(query: String, page: Int, sort: CatalogSort): Page<TitleCard> {
+    /** @param filter готовая часть строки запроса с фильтрами сайта (`&genres[]=…`), см. `CatalogFilter.toQuery`. */
+    suspend fun catalog(query: String, page: Int, sort: CatalogSort, filter: String = ""): Page<TitleCard> {
         val q = if (query.isBlank()) "" else "&q=" + enc(query.trim())
         val sortPart = if (query.isBlank()) "&sort_by=${sort.apiValue}&sort_type=desc" else ""
-        val root = getObject("/api/manga?site_id[]=3&page=$page&limit=30&chapters[min]=1$sortPart$q&fields[]=rate_avg&fields[]=rate")
+        val root = getObject("/api/manga?site_id[]=3&page=$page&limit=30&chapters[min]=1$sortPart$q$filter&fields[]=rate_avg&fields[]=rate")
         return Page(root.arr("data").mapNotNull { (it as? JsonObject)?.toCard() }, root.obj("meta")?.bool("has_next_page") == true)
     }
 
@@ -321,6 +322,40 @@ class LibSocialApi(private val http: LibSocialHttp) {
             media.toCard()?.copy(subtitle = progress)
         }
         return Page(items, root.obj("meta")?.bool("has_next_page") == true)
+    }
+
+    /** Профиль пользователя: ник, аватар, уровень, дата регистрации (`GET /api/user/{id}`). */
+    suspend fun user(id: Long): UserProfile {
+        val o = getObject("/api/user/$id?fields[]=background&fields[]=points&fields[]=created_at&fields[]=about").obj("data")
+            ?: throw ApiException(null, "Пустой профиль")
+        val points = o.obj("points_info")
+        return UserProfile(
+            id = o.long("id") ?: id,
+            username = o.str("username").orEmpty(),
+            avatar = o.obj("avatar")?.str("url"),
+            background = o.obj("background")?.takeIf { it.str("filename") != null }?.str("url"),
+            about = o.str("about")?.takeIf { it.isNotBlank() },
+            createdAt = o.str("created_at"),
+            level = points?.int("level"),
+            totalPoints = points?.long("total_points"),
+            levelPercent = points?.str("point_percent_progress")?.toFloatOrNull(),
+            loginStreak = o.obj("login_streak")?.int("login_streak"),
+        )
+    }
+
+    /** Любимые жанры из статистики профиля (`GET /api/user/{id}/stats`); пусто, если статистика скрыта. */
+    suspend fun userTopGenres(id: Long): List<Pair<String, Float>> = runCatching {
+        getObject("/api/user/$id/stats").obj("data")?.arr("genres").orEmpty().mapNotNull { e ->
+            val g = e as? JsonObject ?: return@mapNotNull null
+            (g.str("label") ?: return@mapNotNull null) to (g.str("percent")?.toFloatOrNull() ?: 0f)
+        }
+    }.getOrDefault(emptyList())
+
+    /** Справочники фильтров каталога (жанры, теги, типы…) — сырой JSON, чтобы приложение кэшировало его как есть. */
+    suspend fun constantsRaw(): String {
+        val r = http.get("/api/constants?" + FilterConstants.FIELDS.joinToString("&") { "fields[]=$it" })
+        if (!r.isSuccess) throw ApiException(r.code, describe(r))
+        return r.body
     }
 
     private suspend fun getObject(path: String): JsonObject = getAny(path) as? JsonObject ?: throw ApiException(null, "Ответ не JSON-объект")
