@@ -172,6 +172,44 @@ class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
     }
 
     /**
+     * Причины жалобы на комментарий, как в окне жалобы сайта: `GET /api/reports/types?namespaces[]=social_comments`
+     * (массив `{name, label, metadata:{comment_required, description}}`). Без сети — запасной список.
+     */
+    suspend fun commentReportReasons(): List<ReportReason> = runCatching {
+        val any = getAny("/api/reports/types?namespaces[]=social_comments")
+        val arr = any as? JsonArray ?: (any as? JsonObject)?.get("data") as? JsonArray ?: JsonArray(emptyList())
+        arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val name = o.str("name") ?: return@mapNotNull null
+            val meta = o.obj("metadata")
+            ReportReason(
+                name = name,
+                label = o.str("label") ?: name,
+                commentRequired = meta?.bool("comment_required") == true,
+                description = meta?.obj("description")?.get("content")
+                    ?.let { DocumentParser.plainText(DocumentParser.parse(it, emptyList(), rich = true)) }?.takeIf { it.isNotBlank() },
+            )
+        }
+    }.onFailure { AppLog.w(TAG, "Причины жалобы не загрузились, беру запасной список", it) }
+        .getOrNull()?.takeIf { it.isNotEmpty() } ?: ReportReason.FALLBACK
+
+    /**
+     * Жалоба на комментарий, как на сайте: `POST /api/comments/{id}/report`
+     * `{reason, metadata:{comment}, reportable_id, reportable_type:"comment", namespaces:"social_comments"}`.
+     */
+    suspend fun reportComment(commentId: Long, reason: String, comment: String) {
+        val body = buildString {
+            append("{\"reason\":").append(kotlinx.serialization.json.JsonPrimitive(reason))
+            append(",\"metadata\":{\"comment\":").append(kotlinx.serialization.json.JsonPrimitive(comment.trim())).append('}')
+            append(",\"reportable_id\":").append(commentId)
+            append(",\"reportable_type\":\"comment\",\"namespaces\":\"social_comments\"}")
+        }
+        val r = http.postJson("/api/comments/$commentId/report", body)
+        AppLog.i(TAG, "Жалоба на комментарий $commentId (причина $reason): HTTP ${r.code}")
+        if (!r.isSuccess) throw ApiException(r.code, describe(r) + (if (r.isJson) ": " + r.body.take(200) else ""))
+    }
+
+    /**
      * Новый комментарий или ответ (`POST /api/comments`). Текст отправляется в формате редактора сайта
      * (ProseMirror doc): абзацы по строкам.
      */

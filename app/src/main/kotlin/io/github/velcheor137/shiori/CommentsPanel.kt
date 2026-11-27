@@ -1,6 +1,16 @@
 package io.github.velcheor137.shiori
 
 import android.widget.Toast
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.RadioButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import io.github.velcheor137.shiori.data.libsocial.ReportReason
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -354,11 +364,11 @@ fun androidx.compose.foundation.lazy.LazyListScope.inlineComments(c: InlineComme
                     c.cc.sources.size > 1 -> t.labels.first()
                     else -> null
                 }
-                CommentItem(t.comment, tag, indent = false, edge = 0.dp, onVote = { v -> vote(t.comment, v) }, onReply = { c.replyTo.value = t.comment })
+                CommentItem(t.comment, tag, indent = false, edge = 0.dp, onVote = { v -> vote(t.comment, v) }, onReply = { c.replyTo.value = t.comment }, authorized = c.authorized, toast = c.toast)
                 val replies = c.repliesByRoot[t.comment.id].orEmpty().sortedBy { it.id }
                 if (replies.isNotEmpty()) {
                     if (c.expanded[t.comment.id] == true) {
-                        replies.forEach { r -> CommentItem(r, null, indent = true, edge = 0.dp, onVote = { v -> vote(r, v) }, onReply = { c.replyTo.value = r }) }
+                        replies.forEach { r -> CommentItem(r, null, indent = true, edge = 0.dp, onVote = { v -> vote(r, v) }, onReply = { c.replyTo.value = r }, authorized = c.authorized, toast = c.toast) }
                     } else {
                         TextButton(onClick = { c.expanded[t.comment.id] = true }, modifier = Modifier.padding(start = 36.dp)) { Text("Показать ответы: ${replies.size}") }
                     }
@@ -498,11 +508,11 @@ fun CommentsSheet(
                     sources.size > 1 -> t.labels.first()
                     else -> null
                 }
-                CommentItem(t.comment, tag, indent = false, highlight = t.comment.id == focusComment, onVote = { v -> vote(t.comment, v) }, onReply = { replyTo = t.comment })
+                CommentItem(t.comment, tag, indent = false, highlight = t.comment.id == focusComment, onVote = { v -> vote(t.comment, v) }, onReply = { replyTo = t.comment }, authorized = authorized, toast = toast)
                 val replies = repliesByRoot[t.comment.id].orEmpty().sortedBy { it.id }
                 if (replies.isNotEmpty()) {
                     if (expanded[t.comment.id] == true) {
-                        replies.forEach { r -> CommentItem(r, null, indent = true, highlight = r.id == focusComment, onVote = { v -> vote(r, v) }, onReply = { replyTo = r }) }
+                        replies.forEach { r -> CommentItem(r, null, indent = true, highlight = r.id == focusComment, onVote = { v -> vote(r, v) }, onReply = { replyTo = r }, authorized = authorized, toast = toast) }
                     } else {
                         TextButton(onClick = { expanded[t.comment.id] = true }, modifier = Modifier.padding(start = 52.dp)) { Text("Показать ответы: ${replies.size}") }
                     }
@@ -529,7 +539,20 @@ fun CommentsSheet(
 }
 
 @Composable
-private fun CommentItem(c: Comment, tag: String?, indent: Boolean, highlight: Boolean = false, edge: androidx.compose.ui.unit.Dp = 16.dp, onVote: (Int) -> Unit, onReply: () -> Unit) {
+private fun CommentItem(
+    c: Comment,
+    tag: String?,
+    indent: Boolean,
+    highlight: Boolean = false,
+    edge: androidx.compose.ui.unit.Dp = 16.dp,
+    onVote: (Int) -> Unit,
+    onReply: () -> Unit,
+    authorized: Boolean,
+    toast: (String) -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    var reporting by remember { mutableStateOf(false) }
+    if (reporting) ReportCommentDialog(c, toast) { reporting = false }
     Row(
         Modifier.fillMaxWidth()
             .then(if (highlight) Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)) else Modifier)
@@ -545,6 +568,22 @@ private fun CommentItem(c: Comment, tag: String?, indent: Boolean, highlight: Bo
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(c.author, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 tag?.let { Text("  · $it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+                Spacer(Modifier.weight(1f))
+                Box {
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.MoreVert, "Ещё", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Пожаловаться") },
+                            leadingIcon = { Icon(Icons.Filled.Warning, null) },
+                            onClick = {
+                                menu = false
+                                if (authorized) reporting = true else toast("Войдите в аккаунт, чтобы отправить жалобу")
+                            },
+                        )
+                    }
+                }
             }
             c.createdAt?.let { Text(it.take(16).replace('T', ' '), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             CommentBody(c)
@@ -569,6 +608,92 @@ private fun CommentItem(c: Comment, tag: String?, indent: Boolean, highlight: Bo
             }
         }
     }
+}
+
+/** Причины жалобы, загруженные за сессию (по источнику). */
+private val reportReasonsCache = java.util.concurrent.ConcurrentHashMap<Source, List<ReportReason>>()
+
+/** Окно жалобы, как на сайте: причина (с пояснением), комментарий для модератора, «Отправить жалобу». */
+@Composable
+private fun ReportCommentDialog(c: Comment, toast: (String) -> Unit, onDismiss: () -> Unit) {
+    val app = LocalContext.current.shiori
+    val source = app.source.value
+    val scope = rememberCoroutineScope()
+    var reasons by remember { mutableStateOf(reportReasonsCache[source]) }
+    var reason by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    LaunchedEffect(source) {
+        if (reasons == null) reasons = app.api.commentReportReasons().also { reportReasonsCache[source] = it }
+    }
+    LaunchedEffect(reasons) { if (reason == null) reason = reasons?.firstOrNull()?.name }
+    val selected = reasons?.firstOrNull { it.name == reason }
+    val canSend = selected != null && !sending && (!selected.commentRequired || note.isNotBlank())
+    AlertDialog(
+        onDismissRequest = { if (!sending) onDismiss() },
+        title = { Text("Отправить жалобу") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "${c.author}: ${c.text.replace('\n', ' ').take(80)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+                Spacer(Modifier.height(8.dp))
+                val list = reasons
+                if (list == null) {
+                    Loading(Modifier.fillMaxWidth().padding(16.dp))
+                } else {
+                    list.forEach { r ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { reason = r.name }.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = reason == r.name, onClick = { reason = r.name })
+                            Text(r.label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    selected?.description?.let {
+                        Text(
+                            it,
+                            Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        label = { Text(if (selected?.commentRequired == true) "Комментарий (обязательно)" else "Комментарий (необязательно)") },
+                        minLines = 2,
+                        maxLines = 5,
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canSend,
+                onClick = {
+                    val r = selected ?: return@TextButton
+                    sending = true
+                    scope.launch {
+                        runCatching { app.api.reportComment(c.id, r.name, note) }
+                            .onSuccess { toast("Жалоба отправлена"); onDismiss() }
+                            .onFailure {
+                                if (it is kotlinx.coroutines.CancellationException) throw it
+                                AppLog.e("COMMENTS", "Жалоба не отправилась", it)
+                                toast("Жалоба не отправилась: ${it.userMessage()}")
+                                sending = false
+                            }
+                    }
+                },
+            ) { Text(if (sending) "Отправляю…" else "Отправить жалобу") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !sending) { Text("Отмена") } },
+    )
 }
 
 /** Тело комментария: текст с разметкой (жирный, курсив, цитаты, спойлеры) и картинки. */

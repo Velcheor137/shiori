@@ -92,6 +92,22 @@ data class Comment(
     val level: Int = 0,
 )
 
+/** Причина жалобы ([name] — id для запроса, [label] — текст для выбора). */
+data class ReportReason(val name: String, val label: String, val commentRequired: Boolean = false, val description: String? = null) {
+    companion object {
+        /** Список с сайта (ноябрь 2026) — на случай, если `/api/reports/types` не ответил. */
+        val FALLBACK = listOf(
+            ReportReason("3", "Оскорбление пользователей"),
+            ReportReason("4", "Флуд / Оффтоп / Комментарий без смысла"),
+            ReportReason("5", "Реклама / Спам"),
+            ReportReason("1", "Спойлер", description = "Вы можете дополнительно указать для модератора, в какой главе находится раскрытие сюжета."),
+            ReportReason("7", "Провокации / Конфликты"),
+            ReportReason("2", "Ненормативная лексика"),
+            ReportReason("8", "Запрещенный / непотребный контент"),
+        )
+    }
+}
+
 data class CommentsPage(val roots: List<Comment>, val replies: List<Comment>, val hasNext: Boolean)
 
 data class AccountBookmark(val id: Long?, val status: Long, val chapterId: Long?, val progress: Int?)
