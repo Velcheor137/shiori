@@ -148,7 +148,7 @@ object DocumentParser {
 
     fun parseProseMirror(doc: JsonObject, attachments: List<Attachment>, siteOrigin: String = "https://ranobelib.me", rich: Boolean = false): List<Block> {
         var spoilers = 0
-        fun inlineOf(nodes: JsonArray?, builder: InlineBuilder) {
+        fun inlineOf(nodes: JsonArray?, builder: InlineBuilder, spoiler: Int = 0) {
             nodes?.forEach { n ->
                 val o = n as? JsonObject ?: return@forEach
                 when (o.str("type")) {
@@ -161,12 +161,14 @@ object DocumentParser {
                                 italic = "italic" in marks,
                                 underline = rich && "underline" in marks,
                                 strike = rich && "strike" in marks,
-                                spoiler = if (rich && "spoiler" in marks) ++spoilers else 0,
+                                spoiler = if (spoiler != 0) spoiler else if (rich && "spoiler" in marks) ++spoilers else 0,
                             ),
                         )
                     }
-                    "hardBreak" -> builder.append("\n", Style())
-                    else -> inlineOf(o["content"] as? JsonArray, builder)
+                    "hardBreak" -> builder.append("\n", Style(spoiler = spoiler))
+                    // Спойлер в строке редактора сайта — узел с текстом внутри.
+                    "spoilerInline" -> inlineOf(o["content"] as? JsonArray, builder, if (rich) (if (spoiler != 0) spoiler else ++spoilers) else 0)
+                    else -> inlineOf(o["content"] as? JsonArray, builder, spoiler)
                 }
             }
         }
@@ -191,7 +193,7 @@ object DocumentParser {
                     }
                     "blockquote" -> if (rich) out += QuoteBlock(blocks(o["content"] as? JsonArray)) else out += blocks(o["content"] as? JsonArray)
                     "spoilerBlock", "spoiler" -> if (rich) {
-                        val title = (o["attrs"] as? JsonObject)?.let { it.str("text") ?: it.str("title") }?.trim().orEmpty()
+                        val title = (o["attrs"] as? JsonObject)?.let { it.str("visibleText") ?: it.str("text") ?: it.str("title") }?.trim().orEmpty()
                         out += SpoilerBlock(title.ifEmpty { "Спойлер" }, blocks(o["content"] as? JsonArray))
                     } else {
                         out += blocks(o["content"] as? JsonArray)

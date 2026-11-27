@@ -210,15 +210,12 @@ class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
     }
 
     /**
-     * Новый комментарий или ответ (`POST /api/comments`). Текст отправляется в формате редактора сайта
-     * (ProseMirror doc): абзацы по строкам.
+     * Новый комментарий или ответ (`POST /api/comments`). [doc] — документ редактора сайта (ProseMirror),
+     * собирается из черновика (`CommentDraft.toDoc`).
      */
-    suspend fun postComment(postId: Long, postType: String, text: String, replyTo: Comment?): Comment? {
-        val paragraphs = text.trim().split(Regex("\\n+")).joinToString(",") { line ->
-            "{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":" + kotlinx.serialization.json.JsonPrimitive(line).toString() + "}]}"
-        }
+    suspend fun postComment(postId: Long, postType: String, doc: JsonObject, replyTo: Comment?): Comment? {
         val body = buildString {
-            append("{\"comment\":{\"type\":\"doc\",\"content\":[").append(paragraphs).append("]},")
+            append("{\"comment\":").append(doc.toString()).append(',')
             append("\"attachments\":[],\"post_type\":\"").append(postType).append("\",\"post_id\":").append(postId).append(',')
             append("\"parent_comment\":").append(replyTo?.id ?: "null").append(',')
             append("\"root_id\":").append(replyTo?.let { it.rootId ?: it.id } ?: "null").append(',')
@@ -230,6 +227,23 @@ class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
         AppLog.i(TAG, "Комментарий отправлен: HTTP ${r.code}")
         if (!r.isSuccess) throw ApiException(r.code, describe(r) + (if (r.isJson) ": " + r.body.take(200) else ""))
         return (runCatching { json.parseToJsonElement(r.body) }.getOrNull() as? JsonObject)?.let { (it["data"] as? JsonObject ?: it).toComment(postId) }
+    }
+
+    /** Правка своего комментария, как на сайте: `PUT /api/comments/{id}` `{comment, attachments}`. */
+    suspend fun editComment(comment: Comment, doc: JsonObject): Comment {
+        val r = http.putJson("/api/comments/${comment.id}", "{\"comment\":$doc,\"attachments\":[]}")
+        AppLog.i(TAG, "Комментарий ${comment.id} изменён: HTTP ${r.code}")
+        if (!r.isSuccess) throw ApiException(r.code, describe(r) + (if (r.isJson) ": " + r.body.take(200) else ""))
+        val parsed = (runCatching { json.parseToJsonElement(r.body) }.getOrNull() as? JsonObject)?.let { (it["data"] as? JsonObject ?: it).toComment(comment.postId) }
+        val blocks = DocumentParser.parse(doc, emptyList(), rich = true)
+        // Голоса, ответы и автор — из старого комментария, если ответ сервера неполный.
+        return (parsed ?: comment).copy(
+            blocks = parsed?.blocks?.takeIf { it.isNotEmpty() } ?: blocks,
+            text = parsed?.text?.takeIf { it.isNotBlank() } ?: DocumentParser.plainText(blocks),
+            votesUp = comment.votesUp, votesDown = comment.votesDown, userVote = comment.userVote,
+            repliesCount = comment.repliesCount, level = comment.level, parentId = comment.parentId, rootId = comment.rootId,
+            author = comment.author, avatar = comment.avatar, userId = comment.userId ?: parsed?.userId,
+        )
     }
 
     /**
@@ -343,6 +357,7 @@ class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
             parentId = long("parent_comment"),
             rootId = long("root_id"),
             author = user?.str("username") ?: "—",
+            userId = user?.long("id"),
             avatar = avatar,
             createdAt = str("created_at"),
             blocks = DocumentParser.parse(this["comment"]?.takeIf { it !is JsonNull }, emptyList(), rich = true),

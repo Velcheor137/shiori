@@ -79,6 +79,8 @@ data class Comment(
     val parentId: Long?,
     val rootId: Long?,
     val author: String,
+    /** id автора — свой комментарий можно редактировать. */
+    val userId: Long? = null,
     val avatar: String?,
     val createdAt: String?,
     val text: String,

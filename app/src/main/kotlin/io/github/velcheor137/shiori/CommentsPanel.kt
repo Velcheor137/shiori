@@ -1,6 +1,11 @@
 package io.github.velcheor137.shiori
 
 import android.widget.Toast
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.style.TextOverflow
+import io.github.velcheor137.shiori.engine.document.CommentDraft
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Warning
@@ -19,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
@@ -207,10 +211,10 @@ class CommentsViewModel(
         }
     }
 
-    fun send(text: String, replyTo: Comment?, defaultPostId: Long, onDone: (String?) -> Unit) {
+    fun send(doc: kotlinx.serialization.json.JsonObject, replyTo: Comment?, defaultPostId: Long, onDone: (String?) -> Unit) {
         val postId = replyTo?.postId ?: defaultPostId
         viewModelScope.launch {
-            runCatching { app.api.postComment(postId, "chapter", text, replyTo) }
+            runCatching { app.api.postComment(postId, "chapter", doc, replyTo) }
                 .onSuccess { created ->
                     if (created != null) {
                         branches.value = branches.value.map { b ->
@@ -221,6 +225,19 @@ class CommentsViewModel(
                     onDone(null)
                 }
                 .onFailure { onDone(it.userMessage()) }
+        }
+    }
+
+    /** Правка своего комментария (`PUT /api/comments/{id}`). */
+    fun edit(c: Comment, doc: kotlinx.serialization.json.JsonObject, onDone: (String?) -> Unit) {
+        viewModelScope.launch {
+            runCatching { app.api.editComment(c, doc) }
+                .onSuccess { replace(it); onDone(null) }
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    AppLog.e("COMMENTS", "Комментарий не изменён", it)
+                    onDone(it.userMessage())
+                }
         }
     }
 
@@ -301,7 +318,10 @@ class InlineComments(
     val replyTo: androidx.compose.runtime.MutableState<Comment?>,
     val authorized: Boolean,
     val toast: (String) -> Unit,
-)
+    val me: Long? = null,
+) {
+    val actions get() = CommentActions(authorized, me, toast) { x, d, done -> vm.edit(x, d, done) }
+}
 
 @Composable
 fun rememberInlineComments(cc: ChapterComments): InlineComments {
@@ -320,7 +340,9 @@ fun rememberInlineComments(cc: ChapterComments): InlineComments {
     return InlineComments(
         vm, cc, items, more, loading, sort, branches, repliesByRoot, filter, expanded, replyTo,
         session is SessionState.Authorized,
-    ) { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+        { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() },
+        (session as? SessionState.Authorized)?.userId ?: app.profile.data.value?.userId,
+    )
 }
 
 /** Лента комментариев элементами общего списка читалки; новая страница грузится, когда низ ленты близко. */
@@ -364,11 +386,11 @@ fun androidx.compose.foundation.lazy.LazyListScope.inlineComments(c: InlineComme
                     c.cc.sources.size > 1 -> t.labels.first()
                     else -> null
                 }
-                CommentItem(t.comment, tag, indent = false, edge = 0.dp, onVote = { v -> vote(t.comment, v) }, onReply = { c.replyTo.value = t.comment }, authorized = c.authorized, toast = c.toast)
+                CommentItem(t.comment, tag, indent = false, edge = 0.dp, onVote = { v -> vote(t.comment, v) }, onReply = { c.replyTo.value = t.comment }, actions = c.actions)
                 val replies = c.repliesByRoot[t.comment.id].orEmpty().sortedBy { it.id }
                 if (replies.isNotEmpty()) {
                     if (c.expanded[t.comment.id] == true) {
-                        replies.forEach { r -> CommentItem(r, null, indent = true, edge = 0.dp, onVote = { v -> vote(r, v) }, onReply = { c.replyTo.value = r }, authorized = c.authorized, toast = c.toast) }
+                        replies.forEach { r -> CommentItem(r, null, indent = true, edge = 0.dp, onVote = { v -> vote(r, v) }, onReply = { c.replyTo.value = r }, actions = c.actions) }
                     } else {
                         TextButton(onClick = { c.expanded[t.comment.id] = true }, modifier = Modifier.padding(start = 36.dp)) { Text("Показать ответы: ${replies.size}") }
                     }
@@ -400,8 +422,10 @@ private fun CommentComposer(
     toast: (String) -> Unit,
     onSent: (Comment?) -> Unit,
 ) {
-    var draft by remember { mutableStateOf("") }
-    var sending by remember { mutableStateOf(false) }
+    // Черновик живёт, пока открыта глава: закрыл редактор — текст и стили остались.
+    var draft by remember { mutableStateOf(CommentDraft()) }
+    var open by remember { mutableStateOf(false) }
+    LaunchedEffect(replyTo) { if (replyTo != null) open = true }
     Column {
         replyTo?.let { r ->
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -409,33 +433,42 @@ private fun CommentComposer(
                 TextButton(onClick = cancelReply) { Text("Отмена") }
             }
         }
-        Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                placeholder = { Text(if (replyTo != null) "Ваш ответ" else "Написать комментарий") },
-                modifier = Modifier.weight(1f),
-                maxLines = 5,
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(12.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+                .clickable { open = true }.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                draft.text.takeIf { it.isNotBlank() }?.replace('\n', ' ') ?: if (replyTo != null) "Ваш ответ" else "Написать комментарий",
+                Modifier.weight(1f),
+                color = if (draft.isBlank) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            IconButton(
-                enabled = draft.isNotBlank() && !sending,
-                onClick = {
-                    sending = true
-                    // Комментарий уходит в версию главы текущего перевода (или к ответу).
-                    val target = replyTo
-                    vm.send(draft, target, currentPostId) { err ->
-                        sending = false
-                        if (err == null) {
-                            draft = ""
-                            onSent(target)
-                            toast("Комментарий отправлен")
-                        } else {
-                            toast("Не отправлено: $err")
-                        }
-                    }
-                },
-            ) { Icon(Icons.AutoMirrored.Filled.Send, "Отправить") }
+            Icon(Icons.Filled.Edit, "Открыть редактор", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+    if (open) {
+        CommentEditorDialog(
+            title = replyTo?.let { "Ответ для ${it.author}" } ?: "Новый комментарий",
+            initial = draft,
+            sendLabel = "Отправить",
+            onDismiss = { draft = it; open = false },
+            onSend = { d, done ->
+                // Комментарий уходит в версию главы текущего перевода (или к ответу).
+                val target = replyTo
+                vm.send(d.toDoc(), target, currentPostId) { err ->
+                    done(err)
+                    if (err == null) {
+                        draft = CommentDraft()
+                        open = false
+                        onSent(target)
+                        toast("Комментарий отправлен")
+                    }
+                }
+            },
+        )
     }
 }
 
@@ -466,6 +499,7 @@ fun CommentsSheet(
     var replyTo by remember { mutableStateOf<Comment?>(null) }
     val authorized = session is SessionState.Authorized
     val toast: (String) -> Unit = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+    val actions = CommentActions(authorized, (session as? SessionState.Authorized)?.userId ?: app.profile.data.value?.userId, toast) { x, d, done -> vm.edit(x, d, done) }
 
     fun vote(c: Comment, v: Int) = if (authorized) vm.vote(c, v, toast) else toast("Войдите в аккаунт, чтобы голосовать")
 
@@ -508,11 +542,11 @@ fun CommentsSheet(
                     sources.size > 1 -> t.labels.first()
                     else -> null
                 }
-                CommentItem(t.comment, tag, indent = false, highlight = t.comment.id == focusComment, onVote = { v -> vote(t.comment, v) }, onReply = { replyTo = t.comment }, authorized = authorized, toast = toast)
+                CommentItem(t.comment, tag, indent = false, highlight = t.comment.id == focusComment, onVote = { v -> vote(t.comment, v) }, onReply = { replyTo = t.comment }, actions = actions)
                 val replies = repliesByRoot[t.comment.id].orEmpty().sortedBy { it.id }
                 if (replies.isNotEmpty()) {
                     if (expanded[t.comment.id] == true) {
-                        replies.forEach { r -> CommentItem(r, null, indent = true, highlight = r.id == focusComment, onVote = { v -> vote(r, v) }, onReply = { replyTo = r }, authorized = authorized, toast = toast) }
+                        replies.forEach { r -> CommentItem(r, null, indent = true, highlight = r.id == focusComment, onVote = { v -> vote(r, v) }, onReply = { replyTo = r }, actions = actions) }
                     } else {
                         TextButton(onClick = { expanded[t.comment.id] = true }, modifier = Modifier.padding(start = 52.dp)) { Text("Показать ответы: ${replies.size}") }
                     }
@@ -547,12 +581,30 @@ private fun CommentItem(
     edge: androidx.compose.ui.unit.Dp = 16.dp,
     onVote: (Int) -> Unit,
     onReply: () -> Unit,
-    authorized: Boolean,
-    toast: (String) -> Unit,
+    actions: CommentActions,
 ) {
     var menu by remember { mutableStateOf(false) }
     var reporting by remember { mutableStateOf(false) }
-    if (reporting) ReportCommentDialog(c, toast) { reporting = false }
+    var editing by remember { mutableStateOf(false) }
+    val mine = actions.me != null && c.userId == actions.me
+    if (reporting) ReportCommentDialog(c, actions.toast) { reporting = false }
+    if (editing) {
+        CommentEditorDialog(
+            title = "Редактирование",
+            initial = remember(c.id) { if (c.blocks.isNotEmpty()) CommentDraft.fromBlocks(c.blocks) else CommentDraft(c.text) },
+            sendLabel = "Сохранить",
+            onDismiss = { editing = false },
+            onSend = { d, done ->
+                actions.edit(c, d.toDoc()) { err ->
+                    done(err)
+                    if (err == null) {
+                        editing = false
+                        actions.toast("Комментарий изменён")
+                    }
+                }
+            },
+        )
+    }
     Row(
         Modifier.fillMaxWidth()
             .then(if (highlight) Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)) else Modifier)
@@ -574,14 +626,22 @@ private fun CommentItem(
                         Icon(Icons.Filled.MoreVert, "Ещё", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Пожаловаться") },
-                            leadingIcon = { Icon(Icons.Filled.Warning, null) },
-                            onClick = {
-                                menu = false
-                                if (authorized) reporting = true else toast("Войдите в аккаунт, чтобы отправить жалобу")
-                            },
-                        )
+                        if (mine) {
+                            DropdownMenuItem(
+                                text = { Text("Редактировать") },
+                                leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                                onClick = { menu = false; editing = true },
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Пожаловаться") },
+                                leadingIcon = { Icon(Icons.Filled.Warning, null) },
+                                onClick = {
+                                    menu = false
+                                    if (actions.authorized) reporting = true else actions.toast("Войдите в аккаунт, чтобы отправить жалобу")
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -609,6 +669,14 @@ private fun CommentItem(
         }
     }
 }
+
+/** Что можно делать с комментарием: [me] — id текущего пользователя (свой комментарий можно редактировать). */
+class CommentActions(
+    val authorized: Boolean,
+    val me: Long?,
+    val toast: (String) -> Unit,
+    val edit: (Comment, kotlinx.serialization.json.JsonObject, (String?) -> Unit) -> Unit,
+)
 
 /** Причины жалобы, загруженные за сессию (по источнику). */
 private val reportReasonsCache = java.util.concurrent.ConcurrentHashMap<Source, List<ReportReason>>()
@@ -774,11 +842,14 @@ private fun SpoilerBox(b: SpoilerBlock, onImage: (String) -> Unit) {
     }
 }
 
-/** Абзац со стилями; спойлеры в строке закрыты плашкой и открываются нажатием (каждый отдельно). */
+/**
+ * Абзац со стилями. Спойлер в строке закрыт сплошной плашкой (текст прозрачный) и открывается нажатием —
+ * каждый отдельно. Нажатие ловится по раскладке текста, без ссылок: стиль ссылки перекрасил бы скрытый текст.
+ */
 @Composable
 private fun RichParagraph(p: Paragraph) {
     val revealed = remember(p) { mutableStateListOf<Int>() }
-    val hidden = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    val hidden = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
     val shown = MaterialTheme.colorScheme.surfaceVariant
     val text = remember(p, revealed.toList(), hidden, shown) {
         buildAnnotatedString {
@@ -787,9 +858,10 @@ private fun RichParagraph(p: Paragraph) {
                 val st = sp.start.coerceIn(0, p.text.length)
                 val en = sp.end.coerceIn(st, p.text.length)
                 if (en <= st) return@forEach
+                val open = sp.spoiler == 0 || sp.spoiler in revealed
                 val deco = listOfNotNull(
-                    TextDecoration.Underline.takeIf { sp.underline },
-                    TextDecoration.LineThrough.takeIf { sp.strike },
+                    TextDecoration.Underline.takeIf { sp.underline && open },
+                    TextDecoration.LineThrough.takeIf { sp.strike && open },
                 )
                 addStyle(
                     SpanStyle(
@@ -801,20 +873,25 @@ private fun RichParagraph(p: Paragraph) {
                     en,
                 )
                 if (sp.spoiler != 0) {
-                    val open = sp.spoiler in revealed
                     addStyle(if (open) SpanStyle(background = shown) else SpanStyle(color = Color.Transparent, background = hidden), st, en)
-                    addLink(
-                        LinkAnnotation.Clickable("spoiler${sp.spoiler}") {
-                            if (open) revealed.remove(sp.spoiler) else revealed.add(sp.spoiler)
-                        },
-                        st,
-                        en,
-                    )
                 }
             }
         }
     }
-    Text(text, style = MaterialTheme.typography.bodyMedium)
+    val spoilers = p.spans.filter { it.spoiler != 0 }
+    var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        onTextLayout = { layout = it },
+        modifier = if (spoilers.isEmpty()) Modifier else Modifier.pointerInput(p) {
+            detectTapGestures { pos ->
+                val off = layout?.getOffsetForPosition(pos) ?: return@detectTapGestures
+                val sp = spoilers.firstOrNull { off >= it.start && off < it.end } ?: return@detectTapGestures
+                if (sp.spoiler in revealed) revealed.remove(sp.spoiler) else revealed.add(sp.spoiler)
+            }
+        },
+    )
 }
 
 /** Заглушка вместо комментариев без сети. */
