@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -109,6 +110,31 @@ fun SettingsScreen(nav: NavController) {
                     scope.launch { check = app.auth.checkMe(); busy = false }
                 }
             }
+        }
+
+        SectionLabel("Обновления")
+        if (app.updater.supported) {
+            val update by app.updater.state.collectAsStateWithLifecycle()
+            var auto by remember { mutableStateOf(app.updater.autoEnabled) }
+            SwitchItem(Icons.Filled.Refresh, "Проверять обновления", "При запуске, не чаще раза в 6 часов; новая версия скачивается с GitHub", auto) {
+                auto = it
+                app.updater.setAuto(it)
+            }
+            NavRow(Icons.Filled.CheckCircle, "Проверить сейчас", update.summary()) {
+                when (val u = update) {
+                    is UpdateState.Available, is UpdateState.Downloading, is UpdateState.NeedsPermission,
+                    is UpdateState.Installing, is UpdateState.Confirm -> app.updater.prompt.value = true
+                    is UpdateState.Failed -> if (u.release != null) app.updater.download(u.release) else app.updater.check(manual = true)
+                    else -> app.updater.check(manual = true)
+                }
+            }
+        } else {
+            Text(
+                "Отладочная сборка: обновления не проверяются — ставьте релизную с GitHub.",
+                Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         Text(

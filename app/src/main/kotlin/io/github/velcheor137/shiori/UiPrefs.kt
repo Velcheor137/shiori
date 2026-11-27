@@ -94,6 +94,8 @@ class UiPrefs(context: Context) {
     fun setString(key: String, v: String) = prefs.edit().putString(key, v).apply()
     fun int(key: String, default: Int) = prefs.getInt(key, default)
     fun setInt(key: String, v: Int) = prefs.edit().putInt(key, v).apply()
+    fun long(key: String, default: Long) = prefs.getLong(key, default)
+    fun setLong(key: String, v: Long) = prefs.edit().putLong(key, v).apply()
 
     /** Фильтр переводчика в списке глав — свой для каждого тайтла; null — все переводы. */
     fun chapterFilter(titleId: Long): Long? = if (prefs.contains("chapters_filter_$titleId")) prefs.getLong("chapters_filter_$titleId", 0) else null
@@ -114,5 +116,7 @@ class UiPrefs(context: Context) {
         const val DL_WIFI = "download_wifi"
         const val COVER_CACHE_MB = "cache_cover_mb"
         const val CHAPTER_CACHE_COUNT = "cache_chapter_count"
+        const val UPDATE_AUTO = "update_auto"
+        const val UPDATE_LAST_CHECK = "update_last_check"
     }
 }

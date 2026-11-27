@@ -42,6 +42,8 @@ class ShioriApp : Application(), SingletonImageLoader.Factory {
         private set
     /** Страницы манги: свой дисковый кэш (500 МБ по умолчанию) и очередь загрузок. */
     val mangaImages by lazy { MangaImages(this, userAgent) }
+    /** Обновления приложения с GitHub Releases. */
+    val updater by lazy { Updater(this, "Shiori/${BuildConfig.VERSION_NAME} (Android ${Build.VERSION.RELEASE})") }
     /** Счётчик изменений настроек манги — читалка перечитывает их. */
     val mangaSettingsVersion = androidx.compose.runtime.mutableIntStateOf(0)
 

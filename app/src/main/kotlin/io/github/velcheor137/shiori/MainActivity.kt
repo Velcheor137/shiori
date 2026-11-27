@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (savedInstanceState == null) shiori.updater.autoCheck()
         setContent {
             val theme by shiori.store.appTheme.collectAsStateWithLifecycle()
             val dark = theme == AppTheme.Dark || (theme == AppTheme.System && isSystemInDarkTheme())
@@ -57,6 +58,7 @@ class MainActivity : ComponentActivity() {
                 // Смена источника — новый граф навигации: экраны и их модели создаются заново для нового сайта.
                 val source by shiori.source.collectAsState()
                 Surface(Modifier.fillMaxSize()) { androidx.compose.runtime.key(source) { ShioriNav("home") } }
+                UpdateDialog()
             }
         }
     }
