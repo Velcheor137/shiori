@@ -20,7 +20,22 @@ data class ImageBlock(val url: String) : Block
 
 data object Separator : Block
 
-data class Span(val start: Int, val end: Int, val bold: Boolean, val italic: Boolean)
+/** Цитата (только в комментариях, режим `rich`). */
+data class QuoteBlock(val blocks: List<Block>) : Block
+
+/** Скрытый блок «спойлер» с заголовком (только в комментариях, режим `rich`). */
+data class SpoilerBlock(val title: String, val blocks: List<Block>) : Block
+
+/** [spoiler] — номер скрытого фрагмента внутри текста (0 — не спойлер); фрагменты открываются по отдельности. */
+data class Span(
+    val start: Int,
+    val end: Int,
+    val bold: Boolean,
+    val italic: Boolean,
+    val underline: Boolean = false,
+    val strike: Boolean = false,
+    val spoiler: Int = 0,
+)
 
 data class Attachment(val name: String?, val id: String?, val url: String)
 
@@ -29,71 +44,134 @@ data class Attachment(val name: String?, val id: String?, val url: String)
  * атрибуты отбрасываются; ссылки на картинки — только https.
  */
 object DocumentParser {
-    fun parse(content: JsonElement?, attachments: List<Attachment>, siteOrigin: String = "https://ranobelib.me"): List<Block> =
+    /**
+     * [rich] — разметка комментариев: цитаты, спойлеры (блоком и в строке), подчёркнутый и зачёркнутый текст.
+     * Для глав выключено: там нумерация абзацев должна оставаться плоской.
+     */
+    fun parse(content: JsonElement?, attachments: List<Attachment>, siteOrigin: String = "https://ranobelib.me", rich: Boolean = false): List<Block> =
         when {
             content == null -> emptyList()
-            content is JsonPrimitive && content.isString -> parseHtml(content.content, siteOrigin)
-            content is JsonObject -> parseProseMirror(content, attachments, siteOrigin)
+            content is JsonPrimitive && content.isString -> parseHtml(content.content, siteOrigin, rich)
+            content is JsonObject -> parseProseMirror(content, attachments, siteOrigin, rich)
             else -> emptyList()
-        }.filterNot { it is Paragraph && it.text.isBlank() && it.spans.isEmpty() && !it.heading }
+        }.clean()
 
-    fun parseHtml(html: String, siteOrigin: String = "https://ranobelib.me"): List<Block> {
+    private fun List<Block>.clean(): List<Block> = mapNotNull { b ->
+        when (b) {
+            is Paragraph -> b.takeUnless { it.text.isBlank() && it.spans.isEmpty() && !it.heading }
+            is QuoteBlock -> b.blocks.clean().takeIf { it.isNotEmpty() }?.let(::QuoteBlock)
+            is SpoilerBlock -> b.copy(blocks = b.blocks.clean())
+            else -> b
+        }
+    }
+
+    fun parseHtml(html: String, siteOrigin: String = "https://ranobelib.me", rich: Boolean = false): List<Block> {
         val body = Jsoup.parseBodyFragment(html).body()
         body.select("script, style, iframe, object, embed, form, svg").remove()
-        val out = ArrayList<Block>()
-        val inline = InlineBuilder()
-        fun flush(heading: Boolean = false) {
-            inline.build(heading)?.let(out::add)
-        }
-        fun walkBlock(node: Node, bold: Boolean, italic: Boolean) {
-            when (node) {
-                is TextNode -> inline.append(node.text(), bold, italic)
-                is Element -> when (val tag = node.normalName()) {
-                    "br" -> inline.append("\n", bold, italic)
-                    "hr" -> { flush(); out += Separator }
-                    "img" -> {
-                        flush()
-                        absolute(node.attr("src"), siteOrigin)?.let { out += ImageBlock(it) }
-                    }
-                    "p", "div", "li", "blockquote", "section", "td", "tr", "ul", "ol", "table", "tbody" -> {
-                        flush()
-                        node.childNodes().forEach { walkBlock(it, bold, italic) }
-                        flush()
-                    }
-                    "h1", "h2", "h3", "h4", "h5", "h6" -> {
-                        flush()
-                        node.childNodes().forEach { walkBlock(it, true, italic) }
-                        flush(heading = true)
-                    }
-                    else -> {
-                        val b = bold || tag == "b" || tag == "strong"
-                        val i = italic || tag == "i" || tag == "em"
-                        node.childNodes().forEach { walkBlock(it, b, i) }
+        var spoilers = 0
+        fun parseNodes(nodes: List<Node>, base: Style): List<Block> {
+            val out = ArrayList<Block>()
+            val inline = InlineBuilder()
+            fun flush(heading: Boolean = false) {
+                inline.build(heading)?.let(out::add)
+            }
+            fun walkBlock(node: Node, st: Style) {
+                when (node) {
+                    is TextNode -> inline.append(node.text(), st)
+                    is Element -> {
+                        val tag = node.normalName()
+                        if (rich) {
+                            val cls = node.classNames()
+                            when {
+                                tag == "blockquote" -> {
+                                    flush()
+                                    out += QuoteBlock(parseNodes(node.childNodes(), st))
+                                    return
+                                }
+                                "spoiler-node" in cls && node.attr("data-spoiler-type") == "block" -> {
+                                    flush()
+                                    val inner = node.selectFirst(".spoiler-node__text") ?: node
+                                    out += SpoilerBlock(node.attr("data-spoiler-text").trim().ifEmpty { "Спойлер" }, parseNodes(inner.childNodes(), st))
+                                    return
+                                }
+                                "comment__spoiler" in cls -> {
+                                    flush()
+                                    val title = node.selectFirst(".spoiler-title")?.text()?.trim().orEmpty()
+                                    val inner = node.selectFirst(".spoiler-text") ?: node
+                                    out += SpoilerBlock(title.ifEmpty { "Спойлер" }, parseNodes(inner.childNodes(), st))
+                                    return
+                                }
+                                "spoiler-node" in cls || "mark-spoiler" in cls || "spoiler" in cls -> {
+                                    val inner = node.selectFirst(".spoiler-node__text") ?: node
+                                    val id = ++spoilers
+                                    inner.childNodes().forEach { walkBlock(it, st.copy(spoiler = id)) }
+                                    return
+                                }
+                            }
+                        }
+                        when (tag) {
+                            "br" -> inline.append("\n", st)
+                            "hr" -> { flush(); out += Separator }
+                            "img" -> {
+                                flush()
+                                absolute(node.attr("src"), siteOrigin)?.let { out += ImageBlock(it) }
+                            }
+                            "p", "div", "li", "blockquote", "section", "td", "tr", "ul", "ol", "table", "tbody" -> {
+                                flush()
+                                node.childNodes().forEach { walkBlock(it, st) }
+                                flush()
+                            }
+                            "h1", "h2", "h3", "h4", "h5", "h6" -> {
+                                flush()
+                                node.childNodes().forEach { walkBlock(it, st.copy(bold = true)) }
+                                flush(heading = true)
+                            }
+                            else -> {
+                                val next = st.copy(
+                                    bold = st.bold || tag == "b" || tag == "strong",
+                                    italic = st.italic || tag == "i" || tag == "em",
+                                    underline = st.underline || (rich && tag == "u"),
+                                    strike = st.strike || (rich && (tag == "s" || tag == "strike" || tag == "del")),
+                                )
+                                node.childNodes().forEach { walkBlock(it, next) }
+                            }
+                        }
                     }
                 }
             }
+            nodes.forEach { walkBlock(it, base) }
+            flush()
+            return out
         }
-        body.childNodes().forEach { walkBlock(it, bold = false, italic = false) }
-        flush()
-        return out
+        return parseNodes(body.childNodes(), Style())
     }
 
-    fun parseProseMirror(doc: JsonObject, attachments: List<Attachment>, siteOrigin: String = "https://ranobelib.me"): List<Block> {
-        val out = ArrayList<Block>()
+    fun parseProseMirror(doc: JsonObject, attachments: List<Attachment>, siteOrigin: String = "https://ranobelib.me", rich: Boolean = false): List<Block> {
+        var spoilers = 0
         fun inlineOf(nodes: JsonArray?, builder: InlineBuilder) {
             nodes?.forEach { n ->
                 val o = n as? JsonObject ?: return@forEach
                 when (o.str("type")) {
                     "text" -> {
                         val marks = (o["marks"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.str("type") }.orEmpty()
-                        builder.append(o.str("text").orEmpty(), "bold" in marks, "italic" in marks)
+                        builder.append(
+                            o.str("text").orEmpty(),
+                            Style(
+                                bold = "bold" in marks,
+                                italic = "italic" in marks,
+                                underline = rich && "underline" in marks,
+                                strike = rich && "strike" in marks,
+                                spoiler = if (rich && "spoiler" in marks) ++spoilers else 0,
+                            ),
+                        )
                     }
-                    "hardBreak" -> builder.append("\n", false, false)
+                    "hardBreak" -> builder.append("\n", Style())
                     else -> inlineOf(o["content"] as? JsonArray, builder)
                 }
             }
         }
-        fun blocks(nodes: JsonArray?) {
+        fun blocks(nodes: JsonArray?): List<Block> {
+            val out = ArrayList<Block>()
             nodes?.forEach { n ->
                 val o = n as? JsonObject ?: return@forEach
                 when (o.str("type")) {
@@ -111,12 +189,50 @@ object DocumentParser {
                         }
                         attrs?.str("src")?.let { absolute(it, siteOrigin)?.let { u -> out += ImageBlock(u) } }
                     }
-                    else -> blocks(o["content"] as? JsonArray)
+                    "blockquote" -> if (rich) out += QuoteBlock(blocks(o["content"] as? JsonArray)) else out += blocks(o["content"] as? JsonArray)
+                    "spoilerBlock", "spoiler" -> if (rich) {
+                        val title = (o["attrs"] as? JsonObject)?.let { it.str("text") ?: it.str("title") }?.trim().orEmpty()
+                        out += SpoilerBlock(title.ifEmpty { "Спойлер" }, blocks(o["content"] as? JsonArray))
+                    } else {
+                        out += blocks(o["content"] as? JsonArray)
+                    }
+                    else -> out += blocks(o["content"] as? JsonArray)
                 }
             }
+            return out
         }
-        blocks(doc["content"] as? JsonArray)
-        return out
+        return blocks(doc["content"] as? JsonArray)
+    }
+
+    /** Плоский текст для превью: спойлеры скрыты, цитаты в «ёлочках». */
+    fun plainText(blocks: List<Block>): String = blocks.mapNotNull { b ->
+        when (b) {
+            is Paragraph -> {
+                val sb = StringBuilder()
+                var i = 0
+                b.spans.filter { it.spoiler != 0 }.sortedBy { it.start }.forEach { sp ->
+                    if (sp.start >= i) {
+                        sb.append(b.text, i, sp.start).append("[спойлер]")
+                        i = sp.end
+                    }
+                }
+                sb.append(b.text, i.coerceAtMost(b.text.length), b.text.length)
+                sb.toString().replace("[спойлер][спойлер]", "[спойлер]")
+            }
+            is QuoteBlock -> "«" + plainText(b.blocks) + "»"
+            is SpoilerBlock -> "[спойлер]"
+            else -> null
+        }
+    }.filter { it.isNotBlank() }.joinToString("\n\n")
+
+    private data class Style(
+        val bold: Boolean = false,
+        val italic: Boolean = false,
+        val underline: Boolean = false,
+        val strike: Boolean = false,
+        val spoiler: Int = 0,
+    ) {
+        val any get() = bold || italic || underline || strike || spoiler != 0
     }
 
     private fun absolute(src: String, siteOrigin: String): String? {
@@ -136,12 +252,12 @@ object DocumentParser {
         private val sb = StringBuilder()
         private val spans = ArrayList<Span>()
 
-        fun append(raw: String, bold: Boolean, italic: Boolean) {
+        fun append(raw: String, st: Style) {
             if (raw.isEmpty()) return
             val text = if (raw == "\n") "\n" else raw.replace(Regex("[ \\t\\r\\n]+"), " ")
             val start = sb.length
             sb.append(text)
-            if (bold || italic) spans += Span(start, sb.length, bold, italic)
+            if (st.any) spans += Span(start, sb.length, st.bold, st.italic, st.underline, st.strike, st.spoiler)
         }
 
         fun build(heading: Boolean = false): Paragraph? {

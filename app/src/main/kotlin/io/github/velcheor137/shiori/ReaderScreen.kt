@@ -94,6 +94,9 @@ import io.github.velcheor137.shiori.data.libsocial.TitleCard
 import io.github.velcheor137.shiori.engine.document.ImageBlock
 import io.github.velcheor137.shiori.engine.document.Paragraph
 import io.github.velcheor137.shiori.engine.document.Separator
+import io.github.velcheor137.shiori.engine.document.QuoteBlock
+import io.github.velcheor137.shiori.engine.document.SpoilerBlock
+import io.github.velcheor137.shiori.engine.document.DocumentParser
 import io.github.velcheor137.shiori.engine.typography.NormalizationMode
 import io.github.velcheor137.shiori.engine.typography.NormalizationSettings
 import io.github.velcheor137.shiori.engine.typography.ParagraphNormalizer
@@ -666,6 +669,8 @@ private fun render(app: ShioriApp, d: ReaderViewModel.Data, norm: NormalizationS
         }
         is ImageBlock -> Shown.Image(DownloadFiles.image(app, d.title.id, b.url).takeIf(File::exists) ?: b.url)
         Separator -> Shown.Rule
+        // В главах цитаты и спойлеры не выделяются (rich = false); на всякий случай — плоским текстом.
+        is QuoteBlock, is SpoilerBlock -> Shown.Text(AnnotatedString(DocumentParser.plainText(listOf(b))), false)
     }
 }
 

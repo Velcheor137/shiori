@@ -176,7 +176,7 @@ fun HomeScreen(nav: NavController) {
                 item {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Cover(last.cover, 72.dp, 104.dp)
+                            Cover(last.cover, 92.dp, 132.dp)
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("Продолжить чтение", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -194,16 +194,16 @@ fun HomeScreen(nav: NavController) {
             val recent = progress.drop(1).take(RECENT_LIMIT)
             if (recent.isNotEmpty()) {
                 item { SectionTitle("Недавно читали") }
-                // Окно фиксированной высоты (~4 строки) со своей прокруткой — главная не растягивается.
+                // Окно фиксированной высоты (~4 строки по ~102 dp) со своей прокруткой — главная не растягивается.
                 item {
-                    Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.fillMaxWidth().heightIn(max = 410.dp).verticalScroll(rememberScrollState())) {
                         recent.forEach { p ->
                             Column(Modifier.fillMaxWidth().clickable { nav.navigate(Routes.reader(p.slug, p.branchId, p.volume, p.number, restore = true)) }) {
                                 Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Cover(p.cover, 40.dp, 58.dp)
+                                    Cover(p.cover, 60.dp, 86.dp)
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(p.titleName, fontFamily = TitleFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(p.titleName, fontFamily = TitleFont, fontSize = 16.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                         Text(p.chapterLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
@@ -218,7 +218,7 @@ fun HomeScreen(nav: NavController) {
                 if (downloadedTitles.isEmpty()) {
                     item { ErrorBox("Скачанных глав нет. Скачать можно в карточке тайтла, когда есть сеть.", null, Modifier.fillMaxWidth()) }
                 }
-                items(downloadedTitles, key = { "d${it.id}" }) { card -> TitleRow(card) { nav.navigate(Routes.title(card.slug)) } }
+                items(downloadedTitles, key = { "d${it.id}" }) { card -> TitleRow(card, cover = 68.dp) { nav.navigate(Routes.title(card.slug)) } }
                 return@LazyColumn
             }
             if (authorized && bookmarkUpdates.isNotEmpty()) {
@@ -229,7 +229,7 @@ fun HomeScreen(nav: NavController) {
             when (val u = updates) {
                 Load.Loading -> item { Loading(Modifier.fillMaxWidth().padding(32.dp)) }
                 is Load.Error -> item { ErrorBox(u.message, { vm.load(force = true) }, Modifier.fillMaxWidth()) }
-                is Load.Ready -> items(u.value, key = { "u${it.id}" }) { card -> TitleRow(card) { nav.navigate(Routes.title(card.slug)) } }
+                is Load.Ready -> items(u.value, key = { "u${it.id}" }) { card -> TitleRow(card, cover = 68.dp) { nav.navigate(Routes.title(card.slug)) } }
             }
         }
     }
@@ -241,10 +241,10 @@ private const val RECENT_LIMIT = 20
 private fun BookmarkUpdateRow(n: Notification, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Cover(n.cover, 40.dp, 58.dp)
+            Cover(n.cover, 60.dp, 86.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(n.title, fontFamily = TitleFont, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(n.title, fontFamily = TitleFont, fontSize = 16.sp, lineHeight = 20.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 val chapter = if (n.volume != null && n.number != null) "Том ${n.volume} Глава ${n.number}" else n.text
                 Text(
                     listOfNotNull(chapter, n.createdAt?.let { formatDate(it) }).joinToString(" · "),

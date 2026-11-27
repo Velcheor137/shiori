@@ -40,4 +40,43 @@ class DocumentParserTest {
         assertEquals(ImageBlock("https://ranobelib.me/uploads/ranobe/a.png"), blocks[1])
         assertEquals(Separator, blocks[2])
     }
+
+    /** Разметка комментариев сайта (образцы из реальных ответов `/api/comments`). */
+    @Test
+    fun commentQuoteSpoilersAndMarks() {
+        val html = "<blockquote><p>— Да. Думаю, это <strong>остановка</strong>.</p></blockquote>" +
+            "<p>мне казалось, <span class=\"spoiler-node\" data-spoiler-type=\"inline\" data-spoiler-text=\"тк\">" +
+            "<span class=\"spoiler-node__text\">я больше 3 букв</span></span> , но <u>тут</u> <s>так</s> интересно</p>" +
+            "<div class=\"spoiler-node\" data-spoiler-type=\"block\" data-spoiler-text=\"спойлер\"><div class=\"spoiler-node__text\"><p>Тайна</p></div></div>" +
+            "<div class=\"comment__spoiler\"><span class=\"spoiler-title\">старый</span><span class=\"spoiler-text\">точнее</span></div>"
+        val blocks = DocumentParser.parse(JsonPrimitive(html), emptyList(), rich = true)
+        assertEquals(4, blocks.size)
+        val quote = assertIs<QuoteBlock>(blocks[0])
+        val q = assertIs<Paragraph>(quote.blocks.single())
+        assertEquals("— Да. Думаю, это остановка.", q.text)
+        assertEquals(listOf(Span(17, 26, bold = true, italic = false)), q.spans)
+
+        val p = assertIs<Paragraph>(blocks[1])
+        assertEquals("мне казалось, я больше 3 букв , но тут так интересно", p.text)
+        val spoiler = p.spans.single { it.spoiler != 0 }
+        assertEquals("я больше 3 букв", p.text.substring(spoiler.start, spoiler.end))
+        assertEquals("тут", p.text.substring(p.spans.single { it.underline }.let { it.start until it.end }))
+        assertEquals("так", p.text.substring(p.spans.single { it.strike }.let { it.start until it.end }))
+
+        val block = assertIs<SpoilerBlock>(blocks[2])
+        assertEquals("спойлер", block.title)
+        assertEquals("Тайна", assertIs<Paragraph>(block.blocks.single()).text)
+        val old = assertIs<SpoilerBlock>(blocks[3])
+        assertEquals("старый", old.title)
+        assertEquals("точнее", assertIs<Paragraph>(old.blocks.single()).text)
+
+        assertEquals("«— Да. Думаю, это остановка.»\n\nмне казалось, [спойлер] , но тут так интересно\n\n[спойлер]\n\n[спойлер]", DocumentParser.plainText(blocks))
+    }
+
+    /** Без `rich` (главы) цитата остаётся обычным абзацем — нумерация абзацев не меняется. */
+    @Test
+    fun chapterBlockquoteStaysFlat() {
+        val blocks = DocumentParser.parse(JsonPrimitive("<blockquote><p>Цитата</p></blockquote><p><u>Текст</u></p>"), emptyList())
+        assertEquals(listOf<Block>(Paragraph("Цитата", emptyList()), Paragraph("Текст", emptyList())), blocks)
+    }
 }

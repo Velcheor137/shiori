@@ -55,10 +55,10 @@ fun Cover(url: String?, width: Dp, height: Dp) {
 }
 
 @Composable
-fun TitleRow(card: TitleCard, onClick: () -> Unit) {
+fun TitleRow(card: TitleCard, cover: Dp = 56.dp, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Cover(card.cover, 56.dp, 80.dp)
+            Cover(card.cover, cover, cover * 10 / 7)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -79,7 +79,7 @@ fun TitleRow(card: TitleCard, onClick: () -> Unit) {
                 }
             }
         }
-        HorizontalDivider(Modifier.padding(start = 84.dp), color = MaterialTheme.colorScheme.outline)
+        HorizontalDivider(Modifier.padding(start = cover + 28.dp), color = MaterialTheme.colorScheme.outline)
     }
 }
 

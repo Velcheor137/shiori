@@ -307,7 +307,7 @@ class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
             author = user?.str("username") ?: "—",
             avatar = avatar,
             createdAt = str("created_at"),
-            blocks = DocumentParser.parse(this["comment"]?.takeIf { it !is JsonNull }, emptyList()),
+            blocks = DocumentParser.parse(this["comment"]?.takeIf { it !is JsonNull }, emptyList(), rich = true),
             text = richText(this["comment"]),
             votesUp = votes?.int("up") ?: votes?.int("likes") ?: int("votes_up"),
             votesDown = votes?.int("down") ?: votes?.int("dislikes"),
@@ -417,10 +417,11 @@ class LibSocialApi(private val http: LibSocialHttp, val siteId: Int = 3) {
         )
     }
 
+    /** Плоский текст комментария (превью, уведомления): спойлеры скрыты. */
     private fun richText(e: JsonElement?): String = when {
         e == null || e is JsonNull -> ""
-        e is JsonPrimitive -> DocumentParser.parseHtml(e.content).joinToString("\n\n") { (it as? io.github.velcheor137.shiori.engine.document.Paragraph)?.text.orEmpty() }
-        e is JsonObject -> DocumentParser.parseProseMirror(e, emptyList()).joinToString("\n\n") { (it as? io.github.velcheor137.shiori.engine.document.Paragraph)?.text.orEmpty() }
+        e is JsonPrimitive -> DocumentParser.plainText(DocumentParser.parseHtml(e.content, rich = true))
+        e is JsonObject -> DocumentParser.plainText(DocumentParser.parseProseMirror(e, emptyList(), rich = true))
         else -> ""
     }.trim()
 

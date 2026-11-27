@@ -1,6 +1,25 @@
 package io.github.velcheor137.shiori
 
 import android.widget.Toast
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextDecoration
+import io.github.velcheor137.shiori.engine.document.Block
+import io.github.velcheor137.shiori.engine.document.ImageBlock
+import io.github.velcheor137.shiori.engine.document.Paragraph
+import io.github.velcheor137.shiori.engine.document.QuoteBlock
+import io.github.velcheor137.shiori.engine.document.Separator
+import io.github.velcheor137.shiori.engine.document.SpoilerBlock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -552,7 +571,7 @@ private fun CommentItem(c: Comment, tag: String?, indent: Boolean, highlight: Bo
     }
 }
 
-/** Тело комментария: абзацы текста и картинки (сайт присылает HTML с <img>, превью — webp). */
+/** Тело комментария: текст с разметкой (жирный, курсив, цитаты, спойлеры) и картинки. */
 @Composable
 private fun CommentBody(c: Comment) {
     if (c.blocks.isEmpty()) {
@@ -560,26 +579,117 @@ private fun CommentBody(c: Comment) {
         return
     }
     var full by remember { mutableStateOf<String?>(null) }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        c.blocks.forEach { b ->
-            when (b) {
-                is io.github.velcheor137.shiori.engine.document.Paragraph -> if (b.text.isNotBlank()) Text(b.text, style = MaterialTheme.typography.bodyMedium)
-                is io.github.velcheor137.shiori.engine.document.ImageBlock -> AsyncImage(
-                    model = b.url,
-                    contentDescription = "Картинка в комментарии",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                        .clickable { full = b.url },
-                )
-                io.github.velcheor137.shiori.engine.document.Separator -> HorizontalDivider()
-            }
-        }
-    }
+    CommentBlocks(c.blocks) { full = it }
     full?.let { url ->
         androidx.compose.ui.window.Dialog(onDismissRequest = { full = null }) {
             AsyncImage(url, null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().clickable { full = null })
         }
     }
+}
+
+@Composable
+private fun CommentBlocks(blocks: List<Block>, onImage: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        blocks.forEach { b ->
+            when (b) {
+                is Paragraph -> if (b.text.isNotBlank()) RichParagraph(b)
+                is ImageBlock -> AsyncImage(
+                    model = b.url,
+                    contentDescription = "Картинка в комментарии",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp).clip(RoundedCornerShape(8.dp))
+                        .clickable { onImage(b.url) },
+                )
+                Separator -> HorizontalDivider()
+                is QuoteBlock -> Row(
+                    Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                ) {
+                    Box(Modifier.width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
+                    Box(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                            CommentBlocks(b.blocks, onImage)
+                        }
+                    }
+                }
+                is SpoilerBlock -> SpoilerBox(b, onImage)
+            }
+        }
+    }
+}
+
+/** Блок-спойлер: свёрнут под заголовком, открывается нажатием. */
+@Composable
+private fun SpoilerBox(b: SpoilerBlock, onImage: (String) -> Unit) {
+    var open by remember(b) { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (open) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                null,
+                Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                b.title.replaceFirstChar { it.uppercase() },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (open) {
+            Box(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp)) { CommentBlocks(b.blocks, onImage) }
+        }
+    }
+}
+
+/** Абзац со стилями; спойлеры в строке закрыты плашкой и открываются нажатием (каждый отдельно). */
+@Composable
+private fun RichParagraph(p: Paragraph) {
+    val revealed = remember(p) { mutableStateListOf<Int>() }
+    val hidden = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    val shown = MaterialTheme.colorScheme.surfaceVariant
+    val text = remember(p, revealed.toList(), hidden, shown) {
+        buildAnnotatedString {
+            append(p.text)
+            p.spans.forEach { sp ->
+                val st = sp.start.coerceIn(0, p.text.length)
+                val en = sp.end.coerceIn(st, p.text.length)
+                if (en <= st) return@forEach
+                val deco = listOfNotNull(
+                    TextDecoration.Underline.takeIf { sp.underline },
+                    TextDecoration.LineThrough.takeIf { sp.strike },
+                )
+                addStyle(
+                    SpanStyle(
+                        fontWeight = if (sp.bold) FontWeight.Bold else null,
+                        fontStyle = if (sp.italic) FontStyle.Italic else null,
+                        textDecoration = if (deco.isEmpty()) null else TextDecoration.combine(deco),
+                    ),
+                    st,
+                    en,
+                )
+                if (sp.spoiler != 0) {
+                    val open = sp.spoiler in revealed
+                    addStyle(if (open) SpanStyle(background = shown) else SpanStyle(color = Color.Transparent, background = hidden), st, en)
+                    addLink(
+                        LinkAnnotation.Clickable("spoiler${sp.spoiler}") {
+                            if (open) revealed.remove(sp.spoiler) else revealed.add(sp.spoiler)
+                        },
+                        st,
+                        en,
+                    )
+                }
+            }
+        }
+    }
+    Text(text, style = MaterialTheme.typography.bodyMedium)
 }
 
 /** Заглушка вместо комментариев без сети. */
