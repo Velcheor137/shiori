@@ -16,10 +16,14 @@ object ImageServers {
 
     /** Запасной список, если справочник не загрузился. */
     val FALLBACK = listOf("https://img3.cdnlibs.org", "https://img3.cdnrulib.link", "https://img2.imglib.info")
+    /** HentaiLib (site_id 4): свои серверы, из `/api/constants` (ноябрь 2026). */
+    val FALLBACK_HENTAI = listOf("https://img3h.hentaicdn.org", "https://img2h.hentaicdn.org")
+
+    fun fallback(siteId: Int): List<String> = if (siteId == 4) FALLBACK_HENTAI else FALLBACK
 
     fun parse(body: String, siteId: Int): List<String> {
         val data = (runCatching { Json.parseToJsonElement(body) }.getOrNull() as? JsonObject)?.get("data") as? JsonObject
-        val arr = data?.get("imageServers") as? JsonArray ?: return FALLBACK
+        val arr = data?.get("imageServers") as? JsonArray ?: return fallback(siteId)
         val byId = arr.mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
             val sites = (o["site_ids"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.intOrNull }.orEmpty()
@@ -28,7 +32,7 @@ object ImageServers {
             val url = (o["url"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
             id to url.trimEnd('/')
         }.toMap()
-        return ORDER.mapNotNull { byId[it] }.distinct().ifEmpty { FALLBACK }
+        return ORDER.mapNotNull { byId[it] }.distinct().ifEmpty { fallback(siteId) }
     }
 
     /** Склейка сервера и пути страницы с одним слэшем (`//manga/...` у API). */

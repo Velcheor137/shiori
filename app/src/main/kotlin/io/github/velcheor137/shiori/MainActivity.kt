@@ -47,8 +47,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         if (savedInstanceState == null) shiori.updater.autoCheck()
         setContent {
-            val theme by shiori.store.appTheme.collectAsStateWithLifecycle()
-            val dark = theme == AppTheme.Dark || (theme == AppTheme.System && isSystemInDarkTheme())
+            // Свой фон темы сам решает, светлые или тёмные значки в строке состояния.
+            val dark = shioriDark()
             DisposableEffect(dark) {
                 val style = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)

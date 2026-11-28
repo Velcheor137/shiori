@@ -74,6 +74,7 @@ fun SettingsScreen(nav: NavController) {
                 FilterChip(selected = appTheme == t, onClick = { app.store.setAppTheme(t) }, label = { Text(t.label, maxLines = 1) })
             }
         }
+        ThemeColorsSection()
 
         SectionLabel("Чтение")
         val manualOffline by app.net.manual.collectAsStateWithLifecycle()

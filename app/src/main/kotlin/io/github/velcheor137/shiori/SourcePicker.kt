@@ -12,7 +12,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +41,30 @@ fun SourcePicker(modifier: Modifier = Modifier) {
     val app = LocalContext.current.shiori
     val source by app.source.collectAsStateWithLifecycle()
     var open by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf<Source?>(null) }
+    fun choose(s: Source) {
+        if (s.adult && !app.ui.bool(UiPrefs.ADULT_CONFIRMED, false)) confirm = s else app.setSource(s)
+    }
+    confirm?.let { s ->
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text("${s.label} — только 18+") },
+            text = {
+                Text(
+                    "Источник с контентом для взрослых. Продолжая, вы подтверждаете, что вам исполнилось 18 лет.\n\n" +
+                        "Каталог доступен всем, а главы сайт открывает только после входа в аккаунт.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    app.ui.setBool(UiPrefs.ADULT_CONFIRMED, true)
+                    confirm = null
+                    app.setSource(s)
+                }) { Text("Мне есть 18") }
+            },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Отмена") } },
+        )
+    }
     Box(modifier) {
         Row(
             Modifier.clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.primaryContainer)
@@ -65,7 +91,7 @@ fun SourcePicker(modifier: Modifier = Modifier) {
                     },
                     leadingIcon = { Icon(s.icon, null) },
                     trailingIcon = { if (s == source) Icon(Icons.Filled.Check, "Выбран", tint = MaterialTheme.colorScheme.primary) },
-                    onClick = { open = false; app.setSource(s) },
+                    onClick = { open = false; choose(s) },
                 )
             }
         }

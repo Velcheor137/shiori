@@ -168,7 +168,10 @@ class ReaderViewModel(
             }.onSuccess { state.value = Load.Ready(it); prefetchNext(it) }
                 .onFailure {
                     AppLog.e("READER", "Глава $slug т$volume г$number (перевод $branchId) не загрузилась", it)
-                    state.value = Load.Error(it.userMessage())
+                    val code = (it as? io.github.velcheor137.shiori.data.libsocial.ApiException)?.code
+                    val src = app.source.value
+                    val needLogin = src.adult && code in setOf(401, 403, 404) && app.auth.state.value !is io.github.velcheor137.shiori.data.auth.SessionState.Authorized
+                    state.value = Load.Error(if (needLogin) "Главы ${src.label} доступны только после входа в аккаунт (Профиль → Войти)." else it.userMessage())
                 }
         }
     }

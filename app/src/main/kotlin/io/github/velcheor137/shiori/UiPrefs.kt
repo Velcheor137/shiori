@@ -117,6 +117,7 @@ class UiPrefs(context: Context) {
         const val COVER_CACHE_MB = "cache_cover_mb"
         const val CHAPTER_CACHE_COUNT = "cache_chapter_count"
         const val UPDATE_AUTO = "update_auto"
+        const val ADULT_CONFIRMED = "adult_confirmed"
         const val UPDATE_LAST_CHECK = "update_last_check"
     }
 }

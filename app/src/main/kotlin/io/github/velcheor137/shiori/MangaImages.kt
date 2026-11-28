@@ -52,18 +52,17 @@ class MangaImages(private val app: ShioriApp, userAgent: String) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
-        .addInterceptor { chain ->
-            chain.proceed(chain.request().newBuilder().header("Referer", Source.Manga.origin + "/").header("User-Agent", userAgent).build())
-        }
+        .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("User-Agent", userAgent).build()) }
         .build()
     private val visible = Semaphore(2)
     private val background = Semaphore(3)
     private val pacing = Mutex()
     private var lastStart = 0L
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<File>>()
-    private var servers: List<String>? = null
+    /** Серверы картинок у каждого сайта свои (MangaLib — imglib/cdnlibs, HentaiLib — hentaicdn). */
+    private val servers = HashMap<Source, List<String>>()
     private val serversLock = Mutex()
-    @Volatile private var preferred = 0
+    private val preferred = ConcurrentHashMap<Source, Int>()
     private var writes = 0
     private val memory = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 6).toInt()) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
@@ -75,11 +74,11 @@ class MangaImages(private val app: ShioriApp, userAgent: String) {
 
     fun isCached(path: String) = file(path).exists()
 
-    private suspend fun serverList(): List<String> = serversLock.withLock {
-        servers ?: runCatching { app.apiFor(Source.Manga).imageServers() }
-            .onFailure { AppLog.w("MANGA", "Список серверов не загрузился, беру запасной", it) }
-            .getOrDefault(ImageServers.FALLBACK)
-            .also { servers = it; AppLog.i("MANGA", "Серверы картинок: $it") }
+    private suspend fun serverList(src: Source): List<String> = serversLock.withLock {
+        servers[src] ?: runCatching { app.apiFor(src).imageServers().ifEmpty { throw IOException("Пустой список серверов") } }
+            .onFailure { AppLog.w("MANGA", "Список серверов ${src.label} не загрузился, беру запасной", it) }
+            .getOrDefault(ImageServers.fallback(src.siteId))
+            .also { servers[src] = it; AppLog.i("MANGA", "Серверы картинок ${src.label}: $it") }
     }
 
     /**
@@ -112,22 +111,24 @@ class MangaImages(private val app: ShioriApp, userAgent: String) {
 
     private suspend fun download(path: String, target: File): File = withContext(Dispatchers.IO) {
         if (target.exists()) return@withContext target
-        val list = serverList()
+        // Страницы — того сайта, что открыт сейчас (экраны пересоздаются при смене источника).
+        val src = app.source.value.takeIf { it.images } ?: Source.Manga
+        val list = serverList(src)
         var last: Exception? = null
         for (k in list.indices) {
-            val si = (preferred + k) % list.size
+            val si = ((preferred[src] ?: 0) + k) % list.size
             val url = ImageServers.url(list[si], path)
             for (attempt in 0 until 3) {
                 pace()
                 val code = try {
-                    client.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                    client.newCall(Request.Builder().url(url).header("Referer", src.origin + "/").build()).execute().use { r ->
                         if (r.isSuccessful) {
                             val bytes = r.body.bytes()
                             dir.mkdirs()
                             val tmp = File(dir, target.name + ".part")
                             tmp.writeBytes(bytes)
                             if (!tmp.renameTo(target)) throw IOException("Не сохранил страницу")
-                            preferred = si
+                            preferred[src] = si
                             if (++writes % 20 == 0) trim()
                             return@withContext target
                         }

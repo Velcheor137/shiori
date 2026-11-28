@@ -46,6 +46,10 @@ data class LocalBookmark(
 
 enum class AppTheme(val label: String) { Dark("Тёмная"), Light("Светлая"), System("Как в системе") }
 
+/** Свои цвета темы приложения (ARGB); null — цвет темы по умолчанию. Свой фон сам задаёт светлую/тёмную схему. */
+@Serializable
+data class ThemeColors(val accent: Long? = null, val background: Long? = null)
+
 enum class TextMode(val label: String) { Original("Оригинал"), Literary("Литературный") }
 
 enum class ReaderTheme(val label: String) {
@@ -128,6 +132,14 @@ class LocalStore(context: Context) {
         prefs.edit().putString(KEY_THEME, t.name).apply()
     }
 
+    private val _themeColors = MutableStateFlow(read(KEY_THEME_COLORS) { json.decodeFromString<ThemeColors>(it) } ?: ThemeColors())
+    val themeColors: StateFlow<ThemeColors> = _themeColors.asStateFlow()
+
+    fun setThemeColors(c: ThemeColors) {
+        _themeColors.value = c
+        prefs.edit().putString(KEY_THEME_COLORS, json.encodeToString(ThemeColors.serializer(), c)).apply()
+    }
+
     private val _syncAccount = MutableStateFlow(prefs.getBoolean(KEY_SYNC, false))
     val syncAccount: StateFlow<Boolean> = _syncAccount.asStateFlow()
 
@@ -184,5 +196,6 @@ class LocalStore(context: Context) {
         const val KEY_DOWNLOADS = "download_queue"
         const val KEY_SYNC = "sync_account_progress"
         const val KEY_THEME = "app_theme"
+        const val KEY_THEME_COLORS = "app_theme_colors"
     }
 }
